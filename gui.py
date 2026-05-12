@@ -14,13 +14,14 @@ from audio_controller import AudioController
 class ConfigSlider(ttk.Frame):
     """Benutzerdefinierter Schieberegler mit Min/Max-Textfeldern"""
     
-    def __init__(self, parent, label, config_key, config: Config, 
-                 min_key, max_key, unit="", **kwargs):
+    def __init__(self, parent, label, config_key, config: Config,
+                 min_key, max_key, unit="", on_change=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.config = config
         self.config_key = config_key
         self.min_key = min_key
         self.max_key = max_key
+        self.on_change = on_change
         
         # Label
         ttk.Label(self, text=label).grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
@@ -63,6 +64,8 @@ class ConfigSlider(ttk.Frame):
         """Callback wenn Slider bewegt wird"""
         self.current_label.config(text=f"{float(value):.1f} {self.unit}")
         self.config.set(self.config_key, float(value))
+        if self.on_change:
+            self.on_change()
     
     def _on_min_changed(self, event=None):
         """Callback wenn Min-Wert geändert wird"""
@@ -77,6 +80,8 @@ class ConfigSlider(ttk.Frame):
                 if current < min_val:
                     self.value_var.set(min_val)
                     self.config.set(self.config_key, min_val)
+                if self.on_change:
+                    self.on_change()
         except ValueError:
             messagebox.showerror("Fehler", "Ungültiger Wert für Minimum")
             self.min_var.set(str(self.config.get(self.min_key, 0)))
@@ -94,6 +99,8 @@ class ConfigSlider(ttk.Frame):
                 if current > max_val:
                     self.value_var.set(max_val)
                     self.config.set(self.config_key, max_val)
+                if self.on_change:
+                    self.on_change()
         except ValueError:
             messagebox.showerror("Fehler", "Ungültiger Wert für Maximum")
             self.max_var.set(str(self.config.get(self.max_key, 100)))
@@ -112,11 +119,39 @@ class AutoMuteGUI:
         self.root.geometry("700x600")
         
         self.config = Config()
+        self.unsaved_changes = False
         self.audio_controller = AudioController(self.config, self._status_callback)
         
         self._create_widgets()
         self._load_devices()
+        self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         
+    def _mark_dirty(self):
+        """Markiert die Konfiguration als ungespeichert"""
+        if not self.unsaved_changes:
+            self.unsaved_changes = True
+            self.root.title("Gateway Auto-Mute Konfiguration *")
+
+    def _mark_clean(self):
+        """Markiert die Konfiguration als gespeichert"""
+        self.unsaved_changes = False
+        self.root.title("Gateway Auto-Mute Konfiguration")
+
+    def _on_close(self):
+        """Behandelt das Schließen des Fensters"""
+        if self.unsaved_changes:
+            answer = messagebox.askyesnocancel(
+                "Ungespeicherte Änderungen",
+                "Es gibt ungespeicherte Änderungen.\nMöchten Sie diese vor dem Beenden speichern?"
+            )
+            if answer is None:  # Abbrechen
+                return
+            if answer:  # Ja
+                self.config.save()
+                self._mark_clean()
+        self.cleanup()
+        self.root.destroy()
+
     def _status_callback(self, message: str):
         """Callback für Statusmeldungen"""
         self.root.after(0, lambda: self._update_status(message))
@@ -161,11 +196,13 @@ class AutoMuteGUI:
         main_frame.bind("<Configure>", on_frame_configure)
         canvas.bind("<Configure>", on_canvas_configure)
         
-        # Maus-Wheel-Support
+        # Maus-Wheel-Support (Windows/macOS + Linux X11)
         def on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
+
         canvas.bind_all("<MouseWheel>", on_mousewheel)
+        canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
+        canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
         
         row = 0
         
@@ -198,29 +235,29 @@ class AutoMuteGUI:
         row += 1
         
         self.volume_threshold_slider = ConfigSlider(
-            levels_frame, 
+            levels_frame,
             "Lautstärke-Schwellwert (ab diesem Pegel wird Mikrofon gedämpft)",
-            "volume_threshold", self.config, 
+            "volume_threshold", self.config,
             "volume_threshold_min", "volume_threshold_max",
-            unit="%"
+            unit="%", on_change=self._mark_dirty
         )
         self.volume_threshold_slider.pack(fill=tk.X, pady=5)
-        
+
         self.mic_normal_slider = ConfigSlider(
             levels_frame,
             "Normaler Mikrofon-Pegel",
             "mic_normal_level", self.config,
             "mic_normal_level_min", "mic_normal_level_max",
-            unit="%"
+            unit="%", on_change=self._mark_dirty
         )
         self.mic_normal_slider.pack(fill=tk.X, pady=5)
-        
+
         self.mic_muted_slider = ConfigSlider(
             levels_frame,
             "Gedämpfter Mikrofon-Pegel",
             "mic_muted_level", self.config,
             "mic_muted_level_min", "mic_muted_level_max",
-            unit="%"
+            unit="%", on_change=self._mark_dirty
         )
         self.mic_muted_slider.pack(fill=tk.X, pady=5)
         
@@ -234,16 +271,16 @@ class AutoMuteGUI:
             "Haltezeit (Mikrofon bleibt gedämpft)",
             "hold_time", self.config,
             "hold_time_min", "hold_time_max",
-            unit="ms"
+            unit="ms", on_change=self._mark_dirty
         )
         self.hold_time_slider.pack(fill=tk.X, pady=5)
-        
+
         self.polling_slider = ConfigSlider(
             time_frame,
             "Messintervall (min. 10ms)",
             "polling_interval", self.config,
             "polling_interval_min", "polling_interval_max",
-            unit="ms"
+            unit="ms", on_change=self._mark_dirty
         )
         self.polling_slider.pack(fill=tk.X, pady=5)
         
@@ -384,6 +421,7 @@ class AutoMuteGUI:
     def _save_config(self):
         """Speichert die Konfiguration"""
         self.config.save()
+        self._mark_clean()
         self._update_status("Konfiguration gespeichert")
         messagebox.showinfo("Erfolg", "Konfiguration wurde gespeichert")
     
@@ -400,7 +438,7 @@ class AutoMuteGUI:
         """Startet die GUI"""
         self._update_status("Gateway Auto-Mute gestartet")
         self.root.mainloop()
-    
+
     def cleanup(self):
         """Räumt beim Beenden auf"""
         if self.audio_controller.is_running():
@@ -409,10 +447,7 @@ class AutoMuteGUI:
 
 def main():
     app = AutoMuteGUI()
-    try:
-        app.run()
-    finally:
-        app.cleanup()
+    app.run()
 
 
 if __name__ == "__main__":
