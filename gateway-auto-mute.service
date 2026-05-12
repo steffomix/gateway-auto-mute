@@ -1,0 +1,15 @@
+[Unit]
+Description=Gateway Auto-Mute Service
+After=sound.target pulseaudio.service
+
+[Service]
+Type=simple
+User=%i
+WorkingDirectory=/home/stefan/Dokumente/Coding/Python/Gateway-auto-mute
+ExecStart=/home/stefan/Dokumente/Coding/Python/Gateway-auto-mute/venv/bin/python3 /home/stefan/Dokumente/Coding/Python/Gateway-auto-mute/service_manager.py start
+ExecStop=/home/stefan/Dokumente/Coding/Python/Gateway-auto-mute/venv/bin/python3 /home/stefan/Dokumente/Coding/Python/Gateway-auto-mute/service_manager.py stop
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
