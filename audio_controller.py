@@ -2,6 +2,9 @@
 Audio-Controller für Gateway Auto-Mute
 Überwacht Lautsprecherpegel und steuert Mikrofonempfindlichkeit
 """
+import os
+import struct
+import subprocess
 import time
 import threading
 import pulsectl
@@ -24,6 +27,12 @@ class AudioController:
         self.mic_muted = False
         self.last_trigger_time = 0
         self.current_state = "idle"  # idle, monitoring, muted
+        # Persistenter Monitor-Stream via parec
+        self._monitor_process: Optional[subprocess.Popen] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._current_monitor_source: str = ""
+        self._current_peak: float = 0.0
+        self._MONITOR_RATE: int = 8000  # Hz, reicht für Pegelüberwachung
         
     def _update_status(self, message: str) -> None:
         """Sendet Statusmeldung an Callback"""
@@ -74,22 +83,85 @@ class AudioController:
         
         return None
     
-    def _get_sink_audio_level(self, sink: pulsectl.PulseSinkInfo, duration: float) -> float:
-        """Misst den tatsächlichen Audio-Pegel eines Sinks via PulseAudio Monitor-Source.
-        Verwendet eine eigene kurzlebige Pulse-Verbindung, da get_peak_sample intern
-        einen PA-Stream öffnet und schließt – das ist nicht sicher auf einem
-        Context, der gleichzeitig für Steueroperationen (volume_set) genutzt wird.
-        """
+    def _start_monitor_stream(self, monitor_source_name: str) -> bool:
+        """Startet einen persistenten parec-Subprocess für den Monitor-Stream."""
+        self._stop_monitor_stream()
         try:
-            with pulsectl.Pulse('gateway-auto-mute-monitor') as p_mon:
-                peak = p_mon.get_peak_sample(sink.monitor_source_name, duration)
-            peak_percent = min(100.0, peak * 100.0)
-            if self.level_callback:
-                self.level_callback(peak_percent)
-            return peak_percent
+            self._monitor_process = subprocess.Popen(
+                ['parec',
+                 f'--device={monitor_source_name}',
+                 '--format=float32le',
+                 '--channels=1',
+                 f'--rate={self._MONITOR_RATE}',
+                 f'--latency-msec={max(100, ((int(self.config.get("polling_interval", 50)) + 99) // 100) * 100)}'],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL
+            )
+            self._current_monitor_source = monitor_source_name
+            self._current_peak = 0.0
+            self._reader_thread = threading.Thread(
+                target=self._reader_loop, daemon=True
+            )
+            self._reader_thread.start()
+            return True
         except Exception as e:
-            self._update_status(f"Fehler beim Messen des Audio-Pegels: {e}")
-            return 0.0
+            self._update_status(f"Fehler beim Starten des Monitor-Streams: {e}")
+            self._monitor_process = None
+            return False
+
+    def _reader_loop(self) -> None:
+        """Liest kontinuierlich Audio-Daten aus parec, aktualisiert self._current_peak
+        und ruft level_callback direkt auf – unabhängig vom Monitoring-Loop."""
+        # 50 ms Chunks: rate * 0.05 s * 4 Bytes (float32)
+        chunk_bytes = int(self._MONITOR_RATE * 0.05) * 4
+        proc = self._monitor_process
+        while self.running and proc and proc.poll() is None:
+            try:
+                data = proc.stdout.read(chunk_bytes)
+                if not data:
+                    break
+                n = len(data) // 4
+                if n > 0:
+                    samples = struct.unpack(f'{n}f', data[:n * 4])
+                    self._current_peak = max(abs(s) for s in samples)
+                    if self.level_callback:
+                        self.level_callback(min(100.0, self._current_peak * 100.0))
+            except Exception:
+                break
+
+    def _stop_monitor_stream(self) -> None:
+        """Stoppt den parec-Subprocess und den Reader-Thread."""
+        proc = self._monitor_process
+        self._monitor_process = None
+        self._current_monitor_source = ""
+        if proc:
+            try:
+                proc.terminate()
+                proc.wait(timeout=2)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        if self._reader_thread:
+            self._reader_thread.join(timeout=2)
+            self._reader_thread = None
+        self._current_peak = 0.0
+
+    def _get_sink_audio_level(self, sink: pulsectl.PulseSinkInfo) -> float:
+        """Gibt den zuletzt gemessenen Peak-Pegel des Sinks zurück (0–100 %).
+        Startet den persistenten parec-Stream neu, falls sich die Monitor-Source
+        geändert hat oder der Prozess nicht mehr läuft.
+        """
+        monitor_source = sink.monitor_source_name
+        # Stream (neu-)starten wenn nötig
+        if (self._current_monitor_source != monitor_source
+                or self._monitor_process is None
+                or self._monitor_process.poll() is not None):
+            if not self._start_monitor_stream(monitor_source):
+                return 0.0
+        peak_percent = min(100.0, self._current_peak * 100.0)
+        return peak_percent
     
     def _set_source_volume(self, source: pulsectl.PulseSourceInfo, volume_percent: float) -> None:
         """Setzt Mikrofon-Empfindlichkeit (0-100%)"""
@@ -155,13 +227,12 @@ class AudioController:
                 hold_time = self.config.get("hold_time", 500) / 1000.0  # ms zu s
                 polling_interval = max(10, self.config.get("polling_interval", 50)) / 1000.0
                 
-                # Messe tatsächlichen Audio-Pegel über das Intervall
-                speaker_volume = self._get_sink_audio_level(speaker, polling_interval)
+                # Aktuellen Peak-Pegel aus dem persistenten Monitor-Stream lesen
+                speaker_volume = self._get_sink_audio_level(speaker)
 
                 current_time = time.time()
+                time.sleep(polling_interval)
 
-
-                
                 # Entscheidungslogik
                 if speaker_volume > volume_threshold:
                     # Lautsprecher ist laut - Mikrofon dämpfen
@@ -191,6 +262,7 @@ class AudioController:
                 time.sleep(1)
         
         # Cleanup beim Beenden
+        self._stop_monitor_stream()
         if self.pulse:
             try:
                 self.pulse.close()

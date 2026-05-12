@@ -394,7 +394,7 @@ class AutoMuteGUI:
 
         self.polling_slider = ConfigSlider(
             time_frame,
-            "Messintervall (min. 10ms)",
+            "Messintervall (min. 100ms) - Erfordert Neustart des Services",
             "polling_interval", self.config,
             "polling_interval_min", "polling_interval_max",
             unit="ms", on_change=self._mark_dirty

@@ -59,14 +59,22 @@ class ServiceManager:
             print(f"Service läuft bereits (PID: {existing_pid})")
             return False
         
+        # Alte PID-Datei entfernen damit wir sicher erkennen, wann der Daemon gestartet ist
+        self._delete_pid()
+
         # Fork-Prozess erstellen für Daemon
         try:
             pid = os.fork()
             if pid > 0:
-                # Elternprozess
-                self._write_pid(pid)
-                print(f"Service gestartet (PID: {pid})")
-                return True
+                # Elternprozess: warte bis der Daemon seine eigene PID geschrieben hat
+                for _ in range(50):  # bis zu 5 Sekunden warten
+                    time.sleep(0.1)
+                    daemon_pid = self._read_pid()
+                    if daemon_pid:
+                        print(f"Service gestartet (PID: {daemon_pid})")
+                        return True
+                print("Service konnte nicht gestartet werden (Timeout)")
+                return False
         except OSError as e:
             print(f"Fork fehlgeschlagen: {e}")
             return False
@@ -85,7 +93,9 @@ class ServiceManager:
             print(f"Zweiter Fork fehlgeschlagen: {e}")
             sys.exit(1)
         
-        # Daemon-Prozess
+        # Daemon-Prozess: eigene PID in Datei schreiben
+        self._write_pid(os.getpid())
+
         # Umleitung der Standard-Streams
         sys.stdout.flush()
         sys.stderr.flush()
