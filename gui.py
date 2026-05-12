@@ -475,7 +475,6 @@ class AutoMuteGUI:
         if self.audio_controller.start():
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
-            self._update_status("Service gestartet")
         else:
             messagebox.showwarning("Warnung", "Service läuft bereits")
     
@@ -484,7 +483,6 @@ class AutoMuteGUI:
         self.audio_controller.stop()
         self.start_button.config(state=tk.NORMAL)
         self.stop_button.config(state=tk.DISABLED)
-        self._update_status("Service gestoppt")
     
     def _save_config(self):
         """Speichert die Konfiguration"""
