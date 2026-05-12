@@ -16,25 +16,25 @@ class Config:
         "microphone_device": "",  # Name oder Index der Mikrofon-Soundkarte
         
         # Schwellwerte und Pegel (in Prozent, 0-100)
-        "volume_threshold_min": 0,
+        "volume_threshold_min": 1,
         "volume_threshold_max": 100,
         "volume_threshold": 10,  # Ab diesem Pegel wird das Mikrofon gedämpft
         
-        "mic_normal_level_min": 0,
+        "mic_normal_level_min": 1,
         "mic_normal_level_max": 100,
         "mic_normal_level": 80,  # Normaler Mikrofonpegel
         
-        "mic_muted_level_min": 0,
+        "mic_muted_level_min": 1,
         "mic_muted_level_max": 100,
         "mic_muted_level": 10,  # Gedämpfter Mikrofonpegel
         
         # Zeiteinstellungen (in Millisekunden)
-        "hold_time_min": 0,
-        "hold_time_max": 5000,
+        "hold_time_min": 100,
+        "hold_time_max": 3000,
         "hold_time": 500,  # Zeit, die das Mikrofon gedämpft bleibt
         
-        "polling_interval_min": 10,
-        "polling_interval_max": 1000,
+        "polling_interval_min": 100,
+        "polling_interval_max": 3000,
         "polling_interval": 50,  # Intervall für Lautstärkemessung
     }
     

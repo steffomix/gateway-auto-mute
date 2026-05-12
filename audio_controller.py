@@ -164,23 +164,23 @@ class AudioController:
                 if speaker_volume > volume_threshold:
                     # Lautsprecher ist laut - Mikrofon dämpfen
                     self.last_trigger_time = current_time
+                    self._set_source_volume(microphone, mic_muted_level)
                     if self.current_state != "muted":
-                        self._set_source_volume(microphone, mic_muted_level)
                         self.current_state = "muted"
                         self._update_status(f"Mikrofon gedämpft (Lautstärke: {speaker_volume:.1f}%)")
                 else:
                     # Lautsprecher ist leise
                     time_since_trigger = current_time - self.last_trigger_time
-                    
+
                     if time_since_trigger < hold_time:
                         # Noch in Hold-Zeit
+                        self._set_source_volume(microphone, mic_muted_level)
                         if self.current_state != "muted":
-                            self._set_source_volume(microphone, mic_muted_level)
                             self.current_state = "muted"
                     else:
                         # Hold-Zeit vorbei - Mikrofon normalisieren
+                        self._set_source_volume(microphone, mic_normal_level)
                         if self.current_state != "monitoring":
-                            self._set_source_volume(microphone, mic_normal_level)
                             self.current_state = "monitoring"
                             self._update_status("Mikrofon normal - überwache...")
                 
@@ -202,6 +202,10 @@ class AudioController:
         """Startet den Überwachungs-Service"""
         if self.running:
             return False
+        
+        # Zustand zurücksetzen für sauberen Start
+        self.current_state = "idle"
+        self.last_trigger_time = 0
         
         self.running = True
         self.thread = threading.Thread(target=self._monitoring_loop, daemon=True)
