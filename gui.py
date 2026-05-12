@@ -179,10 +179,13 @@ class AutoMuteGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Gateway Auto-Mute Konfiguration")
-        self.root.geometry("700x600")
-        
+        self.root.geometry("1100x700")
+
         self.config = Config()
         self.unsaved_changes = False
+        self._alive = True
+        self._level_update_pending = False
+        self._pending_level = 0.0
         self.audio_controller = AudioController(self.config, self._status_callback,
                                                 self._level_callback)
         
@@ -213,16 +216,38 @@ class AutoMuteGUI:
             if answer:  # Ja
                 self.config.save()
                 self._mark_clean()
+        self._alive = False
         self.cleanup()
         self.root.destroy()
 
     def _level_callback(self, level: float):
-        """Callback für Audiopegel-Updates vom Controller"""
-        self.root.after(0, lambda: self.volume_threshold_slider.update_level(level))
+        """Callback für Audiopegel-Updates vom Controller (thread-safe, gedrosselt)"""
+        self._pending_level = level
+        if not self._level_update_pending:
+            self._level_update_pending = True
+            try:
+                self.root.after(50, self._apply_level_update)
+            except tk.TclError:
+                pass
+
+    def _apply_level_update(self):
+        """Wendet den zuletzt gemessenen Pegel auf den Meter an"""
+        self._level_update_pending = False
+        if not self._alive:
+            return
+        try:
+            self.volume_threshold_slider.update_level(self._pending_level)
+        except tk.TclError:
+            pass
 
     def _status_callback(self, message: str):
         """Callback für Statusmeldungen"""
-        self.root.after(0, lambda: self._update_status(message))
+        if not self._alive:
+            return
+        try:
+            self.root.after(0, lambda: self._update_status(message))
+        except tk.TclError:
+            pass
     
     def _update_status(self, message: str):
         """Aktualisiert die Statusanzeige"""
@@ -271,37 +296,50 @@ class AutoMuteGUI:
         canvas.bind_all("<MouseWheel>", on_mousewheel)
         canvas.bind_all("<Button-4>", lambda e: canvas.yview_scroll(-1, "units"))
         canvas.bind_all("<Button-5>", lambda e: canvas.yview_scroll(1, "units"))
-        
-        row = 0
-        
-        # === Geräteauswahl ===
-        device_frame = ttk.LabelFrame(main_frame, text="Geräteauswahl", padding="10")
-        device_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        row += 1
-        
-        # Lautsprecher
-        ttk.Label(device_frame, text="Lautsprecher (Output):").grid(row=0, column=0, sticky=tk.W, pady=5)
-        self.speaker_var = tk.StringVar(value=self.config.get("speaker_device", ""))
-        self.speaker_combo = ttk.Combobox(device_frame, textvariable=self.speaker_var, width=50)
-        self.speaker_combo.grid(row=0, column=1, padx=(10, 0), pady=5)
-        self.speaker_combo.bind('<<ComboboxSelected>>', self._on_speaker_selected)
-        
-        # Mikrofon
-        ttk.Label(device_frame, text="Mikrofon (Input):").grid(row=1, column=0, sticky=tk.W, pady=5)
-        self.mic_var = tk.StringVar(value=self.config.get("microphone_device", ""))
-        self.mic_combo = ttk.Combobox(device_frame, textvariable=self.mic_var, width=50)
-        self.mic_combo.grid(row=1, column=1, padx=(10, 0), pady=5)
-        self.mic_combo.bind('<<ComboboxSelected>>', self._on_mic_selected)
-        
-        # Refresh-Button
-        ttk.Button(device_frame, text="Geräte aktualisieren", 
-                   command=self._load_devices).grid(row=2, column=0, columnspan=2, pady=(10, 0))
-        
-        # === Schwellwerte und Pegel ===
-        levels_frame = ttk.LabelFrame(main_frame, text="Pegel und Schwellwerte", padding="10")
-        levels_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        row += 1
-        
+
+        # Zwei Spalten: links 2/3, rechts 1/3
+        main_frame.columnconfigure(0, weight=2)
+        main_frame.columnconfigure(1, weight=1)
+
+        left_frame = ttk.Frame(main_frame)
+        left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+        left_frame.columnconfigure(0, weight=1)
+
+        right_frame = ttk.Frame(main_frame)
+        right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S))
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+
+        # ── LINKE SPALTE ──────────────────────────────────────────
+
+        left_row = 0
+
+        # === Service-Steuerung ===
+        service_frame = ttk.LabelFrame(left_frame, text="Service-Steuerung", padding="10")
+        service_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        left_row += 1
+
+        button_frame = ttk.Frame(service_frame)
+        button_frame.pack(fill=tk.X)
+
+        self.start_button = ttk.Button(button_frame, text="Service starten", command=self._start_service)
+        self.start_button.pack(side=tk.LEFT, padx=5)
+
+        self.stop_button = ttk.Button(button_frame, text="Service stoppen",
+                                      command=self._stop_service, state=tk.DISABLED)
+        self.stop_button.pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="Konfiguration speichern",
+                   command=self._save_config).pack(side=tk.LEFT, padx=5)
+
+        ttk.Button(button_frame, text="Zurücksetzen",
+                   command=self._reset_config).pack(side=tk.LEFT, padx=5)
+
+        # === Pegel und Schwellwerte ===
+        levels_frame = ttk.LabelFrame(left_frame, text="Pegel und Schwellwerte", padding="10")
+        levels_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        left_row += 1
+
         self.volume_threshold_slider = ConfigSlider(
             levels_frame,
             "Lautstärke-Schwellwert (ab diesem Pegel wird Mikrofon gedämpft)",
@@ -328,12 +366,12 @@ class AutoMuteGUI:
             unit="%", on_change=self._mark_dirty
         )
         self.mic_muted_slider.pack(fill=tk.X, pady=5)
-        
+
         # === Zeiteinstellungen ===
-        time_frame = ttk.LabelFrame(main_frame, text="Zeiteinstellungen", padding="10")
-        time_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        row += 1
-        
+        time_frame = ttk.LabelFrame(left_frame, text="Zeiteinstellungen", padding="10")
+        time_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        left_row += 1
+
         self.hold_time_slider = ConfigSlider(
             time_frame,
             "Haltezeit (Mikrofon bleibt gedämpft)",
@@ -351,66 +389,67 @@ class AutoMuteGUI:
             unit="ms", on_change=self._mark_dirty
         )
         self.polling_slider.pack(fill=tk.X, pady=5)
-        
-        # === Service-Steuerung ===
-        service_frame = ttk.LabelFrame(main_frame, text="Service-Steuerung", padding="10")
-        service_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        row += 1
-        
-        button_frame = ttk.Frame(service_frame)
-        button_frame.pack(fill=tk.X)
-        
-        self.start_button = ttk.Button(button_frame, text="Service starten", command=self._start_service)
-        self.start_button.pack(side=tk.LEFT, padx=5)
-        
-        self.stop_button = ttk.Button(button_frame, text="Service stoppen", 
-                                      command=self._stop_service, state=tk.DISABLED)
-        self.stop_button.pack(side=tk.LEFT, padx=5)
-        
-        ttk.Button(button_frame, text="Konfiguration speichern", 
-                   command=self._save_config).pack(side=tk.LEFT, padx=5)
-        
-        ttk.Button(button_frame, text="Zurücksetzen", 
-                   command=self._reset_config).pack(side=tk.LEFT, padx=5)
-        
-        # === Kommandos ===
-        cmd_frame = ttk.LabelFrame(main_frame, text="Kommandos für Terminal", padding="10")
-        cmd_frame.grid(row=row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        row += 1
-        
+
+        # === Geräteauswahl ===
+        device_frame = ttk.LabelFrame(left_frame, text="Geräteauswahl", padding="10")
+        device_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        left_row += 1
+
+        ttk.Label(device_frame, text="Lautsprecher (Output):").grid(row=0, column=0, sticky=tk.W, pady=5)
+        self.speaker_var = tk.StringVar(value=self.config.get("speaker_device", ""))
+        self.speaker_combo = ttk.Combobox(device_frame, textvariable=self.speaker_var, width=40)
+        self.speaker_combo.grid(row=0, column=1, padx=(10, 0), pady=5)
+        self.speaker_combo.bind('<<ComboboxSelected>>', self._on_speaker_selected)
+
+        ttk.Label(device_frame, text="Mikrofon (Input):").grid(row=1, column=0, sticky=tk.W, pady=5)
+        self.mic_var = tk.StringVar(value=self.config.get("microphone_device", ""))
+        self.mic_combo = ttk.Combobox(device_frame, textvariable=self.mic_var, width=40)
+        self.mic_combo.grid(row=1, column=1, padx=(10, 0), pady=5)
+        self.mic_combo.bind('<<ComboboxSelected>>', self._on_mic_selected)
+
+        ttk.Button(device_frame, text="Geräte aktualisieren",
+                   command=self._load_devices).grid(row=2, column=0, columnspan=2, pady=(10, 0))
+
+        # ── RECHTE SPALTE ─────────────────────────────────────────
+
+        right_row = 0
+
+        # === Status (füllt verfügbare Höhe) ===
+        status_frame = ttk.LabelFrame(right_frame, text="Status", padding="10")
+        status_frame.grid(row=right_row, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        right_row += 1
+
+        self.status_text = tk.Text(status_frame, height=16, width=1, state=tk.DISABLED, wrap=tk.WORD)
+        self.status_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        status_scrollbar = ttk.Scrollbar(status_frame, command=self.status_text.yview)
+        status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.status_text.config(yscrollcommand=status_scrollbar.set)
+
+        # === Kommandos für Terminal ===
+        cmd_frame = ttk.LabelFrame(right_frame, text="Kommandos für Terminal", padding="10")
+        cmd_frame.grid(row=right_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        cmd_frame.columnconfigure(1, weight=1)
+        right_row += 1
+
         script_path = Path(__file__).parent / "service_manager.py"
-        
+
         commands = [
             ("Service starten:", f"python3 {script_path} start"),
             ("Service stoppen:", f"python3 {script_path} stop"),
             ("Service-Status:", f"python3 {script_path} status"),
             ("Konfiguration anzeigen:", f"python3 {script_path} config"),
         ]
-        
+
         for i, (label, cmd) in enumerate(commands):
             ttk.Label(cmd_frame, text=label).grid(row=i, column=0, sticky=tk.W, pady=2)
-            cmd_entry = ttk.Entry(cmd_frame, width=60)
+            cmd_entry = ttk.Entry(cmd_frame, width=1)
             cmd_entry.insert(0, cmd)
             cmd_entry.config(state='readonly')
-            cmd_entry.grid(row=i, column=1, padx=(10, 5), pady=2)
-            
-            ttk.Button(cmd_frame, text="Kopieren", 
+            cmd_entry.grid(row=i, column=1, padx=(10, 5), pady=2, sticky=tk.EW)
+
+            ttk.Button(cmd_frame, text="Kopieren",
                       command=lambda c=cmd: self._copy_to_clipboard(c)).grid(row=i, column=2, pady=2)
-        
-        # === Status ===
-        status_frame = ttk.LabelFrame(main_frame, text="Status", padding="10")
-        status_frame.grid(row=row, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
-        main_frame.rowconfigure(row, weight=1)
-        row += 1
-        
-        self.status_text = tk.Text(status_frame, height=8, state=tk.DISABLED, wrap=tk.WORD)
-        self.status_text.pack(fill=tk.BOTH, expand=True)
-        
-        scrollbar = ttk.Scrollbar(status_frame, command=self.status_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.status_text.config(yscrollcommand=scrollbar.set)
-        
-        main_frame.columnconfigure(0, weight=1)
     
     def _copy_to_clipboard(self, text: str):
         """Kopiert Text in die Zwischenablage"""
