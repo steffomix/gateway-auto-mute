@@ -333,6 +333,19 @@ class AutoMuteGUI:
         self.mic_map = {f"{m['description']} ({m['name']})": m['name'] for m in microphones}
         
         self._update_status(f"Gefunden: {len(speakers)} Lautsprecher, {len(microphones)} Mikrofone")
+        
+        # Gespeicherte Geräte in Combobox vorauswählen
+        saved_speaker = self.config.get("speaker_device", "")
+        for display_name, internal_name in self.speaker_map.items():
+            if internal_name == saved_speaker:
+                self.speaker_var.set(display_name)
+                break
+        
+        saved_mic = self.config.get("microphone_device", "")
+        for display_name, internal_name in self.mic_map.items():
+            if internal_name == saved_mic:
+                self.mic_var.set(display_name)
+                break
     
     def _on_speaker_selected(self, event=None):
         """Callback wenn Lautsprecher ausgewählt wird"""
@@ -340,6 +353,7 @@ class AutoMuteGUI:
         if selected in self.speaker_map:
             device_name = self.speaker_map[selected]
             self.config.set("speaker_device", device_name)
+            self.config.save()
             self._update_status(f"Lautsprecher gewählt: {selected}")
     
     def _on_mic_selected(self, event=None):
@@ -348,6 +362,7 @@ class AutoMuteGUI:
         if selected in self.mic_map:
             device_name = self.mic_map[selected]
             self.config.set("microphone_device", device_name)
+            self.config.save()
             self._update_status(f"Mikrofon gewählt: {selected}")
     
     def _start_service(self):

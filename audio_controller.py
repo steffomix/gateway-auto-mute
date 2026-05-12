@@ -5,8 +5,6 @@ Audio-Controller für Gateway Auto-Mute
 import time
 import threading
 import pulsectl
-import sounddevice as sd
-import numpy as np
 from typing import Optional, Callable
 from config import Config
 
@@ -74,103 +72,19 @@ class AudioController:
         
         return None
     
-    def _find_monitor_source(self, sink: pulsectl.PulseSinkInfo) -> Optional[pulsectl.PulseSourceInfo]:
-        """Findet die Monitor-Source eines Sinks"""
+    def _get_sink_audio_level(self, sink: pulsectl.PulseSinkInfo, duration: float) -> float:
+        """Misst den tatsächlichen Audio-Pegel eines Sinks via PulseAudio Monitor-Source"""
         pulse = self._get_pulse_connection()
         if not pulse:
-            return None
-        
+            return 0.0
         try:
-            # Monitor-Source hat normalerweise den Namen des Sinks + ".monitor"
-            monitor_name = sink.name + ".monitor"
-            sources = pulse.source_list()
-            for source in sources:
-                if source.name == monitor_name or source.name == sink.monitor_source_name:
-                    return source
-        except Exception as e:
-            self._update_status(f"Fehler beim Suchen der Monitor-Source: {e}")
-        
-        return None
-    
-    def _measure_audio_level(self, monitor_source: pulsectl.PulseSourceInfo, duration: float) -> float:
-        """Misst den tatsächlichen Audio-Pegel durch Aufnahme vom Monitor
-        
-        Args:
-            monitor_source: Die Monitor-Source des Lautsprechers
-            duration: Aufnahmedauer in Sekunden
-            
-        Returns:
-            Peak-Pegel als Prozentwert (0-100)
-        """
-        try:
-            # Finde den sounddevice-Index für diese Source
-            devices = sd.query_devices()
-            device_index = None
-            
-            for idx, device in enumerate(devices):
-                if monitor_source.name in str(device['name']) or monitor_source.description in str(device['name']):
-                    device_index = idx
-                    break
-            
-            if device_index is None:
-                # Fallback: Suche nach ".monitor" im Namen
-                for idx, device in enumerate(devices):
-                    if '.monitor' in str(device['name']).lower():
-                        device_index = idx
-                        break
-            
-            if device_index is None:
-                return 0.0
-            
-            # Hole Device-Info
-            device_info = sd.query_devices(device_index)
-            samplerate = int(device_info['default_samplerate'])
-            channels = device_info['max_input_channels']
-            
-            if channels == 0:
-                return 0.0
-            
-            # Berechne Anzahl der Samples
-            frames = int(samplerate * duration)
-            
-            # Nehme Audio auf
-            recording = sd.rec(frames, samplerate=samplerate, channels=channels, 
-                             device=device_index, dtype='float32')
-            sd.wait()  # Warte bis Aufnahme fertig ist
-            
-            # Berechne Peak-Pegel (RMS könnte auch verwendet werden)
-            peak = np.abs(recording).max()
-            
-            # Konvertiere zu Prozent (0.0-1.0 -> 0-100%)
-            # Normalisiere auf typische Audio-Pegel
+            peak = pulse.get_peak_sample(sink.monitor_source_name, duration)
             peak_percent = min(100.0, peak * 100.0)
-
             self._update_status(f"Gemessener Lautsprecherpegel: {peak_percent:.1f}%")
-            
             return peak_percent
-            
         except Exception as e:
             self._update_status(f"Fehler beim Messen des Audio-Pegels: {e}")
             return 0.0
-    
-    def _get_sink_audio_level(self, sink: pulsectl.PulseSinkInfo, duration: float) -> float:
-        """Misst den tatsächlichen Audio-Pegel eines Sinks
-        
-        Returns:
-            Audio-Pegel als Prozentwert (0-100)
-        """
-        # Finde Monitor-Source
-        monitor = self._find_monitor_source(sink)
-        if not monitor:
-            # Fallback: verwende Lautstärke-Einstellung
-            try:
-                avg_volume = sink.volume.value_flat
-                return avg_volume * 100
-            except:
-                return 0.0
-        
-        # Messe tatsächlichen Audio-Pegel
-        return self._measure_audio_level(monitor, duration)
     
     def _set_source_volume(self, source: pulsectl.PulseSourceInfo, volume_percent: float) -> None:
         """Setzt Mikrofon-Empfindlichkeit (0-100%)"""
@@ -268,8 +182,6 @@ class AudioController:
                             self._set_source_volume(microphone, mic_normal_level)
                             self.current_state = "monitoring"
                             self._update_status("Mikrofon normal - überwache...")
-                
-                time.sleep(polling_interval)
                 
             except Exception as e:
                 self._update_status(f"Fehler in Überwachungsschleife: {e}")
