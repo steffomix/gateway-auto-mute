@@ -109,7 +109,7 @@ class AutoMuteGUI:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("Gateway Auto-Mute Konfiguration")
-        self.root.geometry("700x800")
+        self.root.geometry("700x600")
         
         self.config = Config()
         self.audio_controller = AudioController(self.config, self._status_callback)
@@ -130,11 +130,42 @@ class AutoMuteGUI:
     
     def _create_widgets(self):
         """Erstellt alle GUI-Elemente"""
-        # Hauptcontainer mit Scrollbar
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        # Hauptcontainer mit Canvas und Scrollbar
+        container = ttk.Frame(self.root)
+        container.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
+        
+        # Canvas für Scrolling
+        canvas = tk.Canvas(container, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        main_frame = ttk.Frame(canvas, padding="10")
+        
+        # Scrollbar konfigurieren
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Widgets platzieren
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Frame in Canvas einfügen
+        canvas_frame = canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        
+        # Scrollregion aktualisieren wenn Frame sich ändert
+        def on_frame_configure(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        def on_canvas_configure(event):
+            canvas.itemconfig(canvas_frame, width=event.width)
+        
+        main_frame.bind("<Configure>", on_frame_configure)
+        canvas.bind("<Configure>", on_canvas_configure)
+        
+        # Maus-Wheel-Support
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
         
         row = 0
         
