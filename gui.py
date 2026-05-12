@@ -2,10 +2,13 @@
 """
 Grafische Benutzeroberfläche für Gateway Auto-Mute
 """
+import faulthandler
+faulthandler.enable()  # Stacktrace bei SIGSEGV/SIGFPE ausgeben
 import tkinter as tk
 from tkinter import ttk, messagebox
 import pyperclip
 from pathlib import Path
+import queue
 import sys
 from config import Config
 from audio_controller import AudioController
@@ -184,14 +187,14 @@ class AutoMuteGUI:
         self.config = Config()
         self.unsaved_changes = False
         self._alive = True
-        self._level_update_pending = False
-        self._pending_level = 0.0
+        self._msg_queue: queue.SimpleQueue = queue.SimpleQueue()
         self.audio_controller = AudioController(self.config, self._status_callback,
                                                 self._level_callback)
-        
+
         self._create_widgets()
         self._load_devices()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._poll_queue()
         
     def _mark_dirty(self):
         """Markiert die Konfiguration als ungespeichert"""
@@ -221,40 +224,48 @@ class AutoMuteGUI:
         self.root.destroy()
 
     def _level_callback(self, level: float):
-        """Callback für Audiopegel-Updates vom Controller (thread-safe, gedrosselt)"""
-        self._pending_level = level
-        if not self._level_update_pending:
-            self._level_update_pending = True
-            try:
-                self.root.after(50, self._apply_level_update)
-            except tk.TclError:
-                pass
-
-    def _apply_level_update(self):
-        """Wendet den zuletzt gemessenen Pegel auf den Meter an"""
-        self._level_update_pending = False
-        if not self._alive:
-            return
-        try:
-            self.volume_threshold_slider.update_level(self._pending_level)
-        except tk.TclError:
-            pass
+        """Wird vom Background-Thread aufgerufen – nur Queue-Put, kein tkinter!"""
+        self._msg_queue.put(('level', level))
 
     def _status_callback(self, message: str):
-        """Callback für Statusmeldungen"""
+        """Wird vom Background-Thread aufgerufen – nur Queue-Put, kein tkinter!"""
+        self._msg_queue.put(('status', message))
+
+    def _poll_queue(self):
+        """Läuft im Hauptthread; verarbeitet alle ausstehenden Nachrichten aus der Queue"""
         if not self._alive:
             return
         try:
-            self.root.after(0, lambda: self._update_status(message))
+            # Alle verfügbaren Nachrichten auf einmal verarbeiten
+            while True:
+                kind, value = self._msg_queue.get_nowait()
+                if kind == 'level':
+                    try:
+                        self.volume_threshold_slider.update_level(value)
+                    except tk.TclError:
+                        pass
+                elif kind == 'status':
+                    self._update_status(value)
+        except queue.Empty:
+            pass
+        finally:
+            if self._alive:
+                try:
+                    self.root.after(50, self._poll_queue)
+                except tk.TclError:
+                    pass
+
+    def _update_status(self, message: str):
+        """Aktualisiert die Statusanzeige (nur aus Hauptthread aufrufen)"""
+        if not self._alive:
+            return
+        try:
+            self.status_text.config(state=tk.NORMAL)
+            self.status_text.insert(tk.END, f"{message}\n")
+            self.status_text.see(tk.END)
+            self.status_text.config(state=tk.DISABLED)
         except tk.TclError:
             pass
-    
-    def _update_status(self, message: str):
-        """Aktualisiert die Statusanzeige"""
-        self.status_text.config(state=tk.NORMAL)
-        self.status_text.insert(tk.END, f"{message}\n")
-        self.status_text.see(tk.END)
-        self.status_text.config(state=tk.DISABLED)
     
     def _create_widgets(self):
         """Erstellt alle GUI-Elemente"""

@@ -75,12 +75,14 @@ class AudioController:
         return None
     
     def _get_sink_audio_level(self, sink: pulsectl.PulseSinkInfo, duration: float) -> float:
-        """Misst den tatsächlichen Audio-Pegel eines Sinks via PulseAudio Monitor-Source"""
-        pulse = self._get_pulse_connection()
-        if not pulse:
-            return 0.0
+        """Misst den tatsächlichen Audio-Pegel eines Sinks via PulseAudio Monitor-Source.
+        Verwendet eine eigene kurzlebige Pulse-Verbindung, da get_peak_sample intern
+        einen PA-Stream öffnet und schließt – das ist nicht sicher auf einem
+        Context, der gleichzeitig für Steueroperationen (volume_set) genutzt wird.
+        """
         try:
-            peak = pulse.get_peak_sample(sink.monitor_source_name, duration)
+            with pulsectl.Pulse('gateway-auto-mute-monitor') as p_mon:
+                peak = p_mon.get_peak_sample(sink.monitor_source_name, duration)
             peak_percent = min(100.0, peak * 100.0)
             if self.level_callback:
                 self.level_callback(peak_percent)
