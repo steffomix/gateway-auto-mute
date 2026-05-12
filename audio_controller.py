@@ -4,8 +4,6 @@ Audio-Controller für Gateway Auto-Mute
 """
 import time
 import threading
-import sounddevice as sd
-import numpy as np
 import pulsectl
 from typing import Optional, Callable
 from config import Config
