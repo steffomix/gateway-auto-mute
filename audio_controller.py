@@ -12,9 +12,11 @@ from config import Config
 class AudioController:
     """Kontrolliert Audio-Geräte und implementiert die Auto-Mute-Logik"""
     
-    def __init__(self, config: Config, status_callback: Optional[Callable] = None):
+    def __init__(self, config: Config, status_callback: Optional[Callable] = None,
+                 level_callback: Optional[Callable] = None):
         self.config = config
         self.status_callback = status_callback
+        self.level_callback = level_callback
         self.running = False
         self.thread: Optional[threading.Thread] = None
         self.pulse: Optional[pulsectl.Pulse] = None
@@ -80,7 +82,8 @@ class AudioController:
         try:
             peak = pulse.get_peak_sample(sink.monitor_source_name, duration)
             peak_percent = min(100.0, peak * 100.0)
-            self._update_status(f"Gemessener Lautsprecherpegel: {peak_percent:.1f}%")
+            if self.level_callback:
+                self.level_callback(peak_percent)
             return peak_percent
         except Exception as e:
             self._update_status(f"Fehler beim Messen des Audio-Pegels: {e}")
@@ -153,8 +156,6 @@ class AudioController:
                 # Messe tatsächlichen Audio-Pegel über das Intervall
                 speaker_volume = self._get_sink_audio_level(speaker, polling_interval)
 
-                self._update_status(f"Überwache... Lautsprecherpegel: {speaker_volume:.1f}%")
-                
                 current_time = time.time()
 
 

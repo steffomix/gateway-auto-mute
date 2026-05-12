@@ -12,53 +12,113 @@ from audio_controller import AudioController
 
 
 class ConfigSlider(ttk.Frame):
-    """Benutzerdefinierter Schieberegler mit Min/Max-Textfeldern"""
-    
+    """Benutzerdefinierter Schieberegler mit Min/Max-Textfeldern und optionalem Pegelanzeige-Balken"""
+
     def __init__(self, parent, label, config_key, config: Config,
-                 min_key, max_key, unit="", on_change=None, **kwargs):
+                 min_key, max_key, unit="", on_change=None, show_level_meter=False, **kwargs):
         super().__init__(parent, **kwargs)
         self.config = config
         self.config_key = config_key
         self.min_key = min_key
         self.max_key = max_key
         self.on_change = on_change
-        
-        # Label
+        self.unit = unit
+        self._meter_level = 0.0
+
+        # row 0: Label
         ttk.Label(self, text=label).grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
-        
+
+        # row 1: Level-Meter Canvas (optional) ODER direkt der Slider-Bereich
+        if show_level_meter:
+            self.meter_canvas = tk.Canvas(self, height=18, bg='#1e1e1e',
+                                          highlightthickness=1, highlightbackground='#555')
+            self.meter_canvas.grid(row=1, column=0, columnspan=5, sticky=tk.EW, padx=0, pady=(2, 1))
+            self.meter_canvas.bind('<Configure>', lambda e: self._draw_meter())
+            slider_row = 2
+            label_row = 3
+        else:
+            self.meter_canvas = None
+            slider_row = 1
+            label_row = 2
+
         # Min-Wert Eingabe
-        ttk.Label(self, text="Min:").grid(row=1, column=0, padx=(0, 5))
+        ttk.Label(self, text="Min:").grid(row=slider_row, column=0, padx=(0, 5))
         self.min_var = tk.StringVar(value=str(config.get(min_key, 0)))
         min_entry = ttk.Entry(self, textvariable=self.min_var, width=8)
-        min_entry.grid(row=1, column=1, padx=(0, 10))
+        min_entry.grid(row=slider_row, column=1, padx=(0, 10))
         min_entry.bind('<FocusOut>', self._on_min_changed)
         min_entry.bind('<Return>', self._on_min_changed)
-        
+
         # Slider
         self.value_var = tk.DoubleVar(value=config.get(config_key, 0))
         self.slider = ttk.Scale(
-            self, 
-            from_=config.get(min_key, 0), 
+            self,
+            from_=config.get(min_key, 0),
             to=config.get(max_key, 100),
             orient=tk.HORIZONTAL,
             variable=self.value_var,
             command=self._on_slider_changed
         )
-        self.slider.grid(row=1, column=2, sticky=tk.EW, padx=5)
+        self.slider.grid(row=slider_row, column=2, sticky=tk.EW, padx=5)
         self.columnconfigure(2, weight=1)
-        
+
         # Max-Wert Eingabe
-        ttk.Label(self, text="Max:").grid(row=1, column=3, padx=(10, 5))
+        ttk.Label(self, text="Max:").grid(row=slider_row, column=3, padx=(10, 5))
         self.max_var = tk.StringVar(value=str(config.get(max_key, 100)))
         max_entry = ttk.Entry(self, textvariable=self.max_var, width=8)
-        max_entry.grid(row=1, column=4)
+        max_entry.grid(row=slider_row, column=4)
         max_entry.bind('<FocusOut>', self._on_max_changed)
         max_entry.bind('<Return>', self._on_max_changed)
-        
+
         # Aktueller Wert
         self.current_label = ttk.Label(self, text=f"{self.value_var.get():.1f} {unit}")
-        self.current_label.grid(row=2, column=0, columnspan=5, sticky=tk.W)
-        self.unit = unit
+        self.current_label.grid(row=label_row, column=0, columnspan=5, sticky=tk.W)
+
+    def update_level(self, level_percent: float):
+        """Aktualisiert den angezeigten Audiopegel im Meter"""
+        self._meter_level = level_percent
+        self._draw_meter()
+
+    def _draw_meter(self):
+        """Zeichnet den Pegelanzeige-Balken neu"""
+        if not self.meter_canvas:
+            return
+        w = self.meter_canvas.winfo_width()
+        h = self.meter_canvas.winfo_height()
+        if w <= 1:
+            return
+
+        try:
+            min_val = float(self.min_var.get())
+            max_val = float(self.max_var.get())
+        except ValueError:
+            return
+        val_range = max_val - min_val if max_val != min_val else 1.0
+
+        level = self._meter_level
+        threshold = self.value_var.get()
+
+        level_x = max(0, min(w, (level - min_val) / val_range * w))
+        threshold_x = max(0, min(w - 1, (threshold - min_val) / val_range * w))
+
+        self.meter_canvas.delete("all")
+
+        # Hintergrund
+        self.meter_canvas.create_rectangle(0, 0, w, h, fill='#1e1e1e', outline='')
+
+        # Pegelbalken: grün wenn unter Schwellwert, rot wenn drüber
+        if level_x > 0:
+            color = '#4caf50' if level <= threshold else '#f44336'
+            self.meter_canvas.create_rectangle(0, 2, level_x, h - 2, fill=color, outline='')
+
+        # Schwellwert-Linie (gelb, gestrichelt)
+        self.meter_canvas.create_line(threshold_x, 0, threshold_x, h,
+                                      fill='#ffeb3b', width=2, dash=(3, 2))
+
+        # Pegelwert als Text
+        self.meter_canvas.create_text(w - 4, h // 2, anchor='e',
+                                      text=f"{level:.0f}%", fill='white',
+                                      font=('TkDefaultFont', 8))
     
     def _on_slider_changed(self, value):
         """Callback wenn Slider bewegt wird"""
@@ -66,6 +126,7 @@ class ConfigSlider(ttk.Frame):
         self.config.set(self.config_key, float(value))
         if self.on_change:
             self.on_change()
+        self._draw_meter()
     
     def _on_min_changed(self, event=None):
         """Callback wenn Min-Wert geändert wird"""
@@ -82,10 +143,11 @@ class ConfigSlider(ttk.Frame):
                     self.config.set(self.config_key, min_val)
                 if self.on_change:
                     self.on_change()
+                self._draw_meter()
         except ValueError:
             messagebox.showerror("Fehler", "Ungültiger Wert für Minimum")
             self.min_var.set(str(self.config.get(self.min_key, 0)))
-    
+
     def _on_max_changed(self, event=None):
         """Callback wenn Max-Wert geändert wird"""
         try:
@@ -101,6 +163,7 @@ class ConfigSlider(ttk.Frame):
                     self.config.set(self.config_key, max_val)
                 if self.on_change:
                     self.on_change()
+                self._draw_meter()
         except ValueError:
             messagebox.showerror("Fehler", "Ungültiger Wert für Maximum")
             self.max_var.set(str(self.config.get(self.max_key, 100)))
@@ -120,7 +183,8 @@ class AutoMuteGUI:
         
         self.config = Config()
         self.unsaved_changes = False
-        self.audio_controller = AudioController(self.config, self._status_callback)
+        self.audio_controller = AudioController(self.config, self._status_callback,
+                                                self._level_callback)
         
         self._create_widgets()
         self._load_devices()
@@ -151,6 +215,10 @@ class AutoMuteGUI:
                 self._mark_clean()
         self.cleanup()
         self.root.destroy()
+
+    def _level_callback(self, level: float):
+        """Callback für Audiopegel-Updates vom Controller"""
+        self.root.after(0, lambda: self.volume_threshold_slider.update_level(level))
 
     def _status_callback(self, message: str):
         """Callback für Statusmeldungen"""
@@ -239,7 +307,7 @@ class AutoMuteGUI:
             "Lautstärke-Schwellwert (ab diesem Pegel wird Mikrofon gedämpft)",
             "volume_threshold", self.config,
             "volume_threshold_min", "volume_threshold_max",
-            unit="%", on_change=self._mark_dirty
+            unit="%", on_change=self._mark_dirty, show_level_meter=True
         )
         self.volume_threshold_slider.pack(fill=tk.X, pady=5)
 
