@@ -489,6 +489,16 @@ class AutoMuteGUI:
         if self._external_service:
             messagebox.showwarning("Warnung", "Hintergrund-Daemon läuft bereits.")
             return
+        if self.audio_controller.is_running():
+            if not messagebox.askyesno(
+                "In-Process Controller aktiv",
+                "Der In-Process Controller läuft noch.\n"
+                "Er wird jetzt gestoppt, bevor der Daemon gestartet wird. Fortfahren?"
+            ):
+                return
+            self.audio_controller.stop()
+            self.start_button.config(state=tk.NORMAL)
+            self.stop_button.config(state=tk.DISABLED)
         self._update_status("Starte Hintergrund-Daemon...")
         self._service_manager.start()
         # _check_external_service_status erkennt den neuen Prozess automatisch
