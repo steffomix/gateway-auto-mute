@@ -224,6 +224,16 @@ class AutoMuteGUI:
             if answer:  # Ja
                 self.config.save()
                 self._mark_clean()
+        # Reload-Nachfrage wenn ein Service läuft
+        service_running = (self._external_service
+                           or self.audio_controller.is_running())
+        if service_running:
+            if messagebox.askyesno(
+                "Service neu laden",
+                "Soll der laufende Service jetzt neu geladen werden,\n"
+                "um Konfigurationsänderungen zu übernehmen?"
+            ):
+                self._reload_service()
         self._alive = False
         self.cleanup()
         self.root.destroy()
@@ -442,30 +452,21 @@ class AutoMuteGUI:
         status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.status_text.config(yscrollcommand=status_scrollbar.set)
 
-        # === Kommandos für Terminal ===
-        cmd_frame = ttk.LabelFrame(right_frame, text="Kommandos für Terminal", padding="10")
+        # === Service-Aktionen ===
+        cmd_frame = ttk.LabelFrame(right_frame, text="Service-Aktionen", padding="10")
         cmd_frame.grid(row=right_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
-        cmd_frame.columnconfigure(1, weight=1)
         right_row += 1
 
-        script_path = Path(__file__).parent / "service_manager.py"
-
-        commands = [
-            ("Service starten:", f"python3 {script_path} start"),
-            ("Service stoppen:", f"python3 {script_path} stop"),
-            ("Service-Status:", f"python3 {script_path} status"),
-            ("Konfiguration anzeigen:", f"python3 {script_path} config"),
+        actions = [
+            ("Service starten",          self._start_service),
+            ("Service stoppen",           self._stop_service),
+            ("Service neu laden (reload)", self._reload_service),
+            ("Service-Status anzeigen",   self._show_service_status),
         ]
 
-        for i, (label, cmd) in enumerate(commands):
-            ttk.Label(cmd_frame, text=label).grid(row=i, column=0, sticky=tk.W, pady=2)
-            cmd_entry = ttk.Entry(cmd_frame, width=1)
-            cmd_entry.insert(0, cmd)
-            cmd_entry.config(state='readonly')
-            cmd_entry.grid(row=i, column=1, padx=(10, 5), pady=2, sticky=tk.EW)
-
-            ttk.Button(cmd_frame, text="Kopieren",
-                      command=lambda c=cmd: self._copy_to_clipboard(c)).grid(row=i, column=2, pady=2)
+        for label, cmd in actions:
+            ttk.Button(cmd_frame, text=label, command=cmd).pack(
+                fill=tk.X, pady=2)
     
     def _copy_to_clipboard(self, text: str):
         """Kopiert Text in die Zwischenablage"""
@@ -474,6 +475,30 @@ class AutoMuteGUI:
             self._update_status(f"In Zwischenablage kopiert: {text}")
         except Exception as e:
             messagebox.showerror("Fehler", f"Konnte nicht in Zwischenablage kopieren: {e}")
+
+    def _reload_service(self):
+        """Stoppt und startet den laufenden Daemon-Service neu"""
+        if self._external_service:
+            self._update_status("Lade Service neu...")
+            self._service_manager.restart()
+        elif self.audio_controller.is_running():
+            self._update_status("Lade Service neu...")
+            self.audio_controller.stop()
+            self.audio_controller.start()
+            self._update_status("Service neu geladen")
+        else:
+            messagebox.showinfo("Info", "Service läuft nicht – nichts zu neu laden.")
+
+    def _show_service_status(self):
+        """Zeigt Daemon-Status im Status-Panel"""
+        pid = self._service_manager._read_pid()
+        running = self._service_manager._is_process_running(pid)
+        if running:
+            self._update_status(f"Daemon-Status: läuft (PID: {pid})")
+        elif self.audio_controller.is_running():
+            self._update_status("Daemon-Status: In-Process-Service läuft")
+        else:
+            self._update_status("Daemon-Status: gestoppt")
     
     def _load_devices(self):
         """Lädt verfügbare Audio-Geräte"""
