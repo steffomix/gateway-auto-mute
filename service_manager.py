@@ -7,6 +7,7 @@ import sys
 import os
 import time
 import signal
+import subprocess
 import json
 from pathlib import Path
 from config import Config
@@ -52,84 +53,66 @@ class ServiceManager:
             return False
     
     def start(self) -> bool:
-        """Startet den Service im Hintergrund"""
-        # Prüfe ob Service bereits läuft
+        """Startet den Service als unabh\u00e4ngigen Hintergrundprozess"""
         existing_pid = self._read_pid()
         if existing_pid and self._is_process_running(existing_pid):
-            print(f"Service läuft bereits (PID: {existing_pid})")
+            print(f"Service l\u00e4uft bereits (PID: {existing_pid})")
             return False
-        
-        # Alte PID-Datei entfernen damit wir sicher erkennen, wann der Daemon gestartet ist
+
         self._delete_pid()
 
-        # Fork-Prozess erstellen für Daemon
-        try:
-            pid = os.fork()
-            if pid > 0:
-                # Elternprozess: warte bis der Daemon seine eigene PID geschrieben hat
-                for _ in range(50):  # bis zu 5 Sekunden warten
-                    time.sleep(0.1)
-                    daemon_pid = self._read_pid()
-                    if daemon_pid:
-                        print(f"Service gestartet (PID: {daemon_pid})")
-                        return True
-                print("Service konnte nicht gestartet werden (Timeout)")
-                return False
-        except OSError as e:
-            print(f"Fork fehlgeschlagen: {e}")
-            return False
-        
-        # Kindprozess (Daemon)
-        # Setze Prozessgruppe
-        os.setsid()
-        
-        # Zweiter Fork
-        try:
-            pid = os.fork()
-            if pid > 0:
-                # Erster Kindprozess beenden
-                sys.exit(0)
-        except OSError as e:
-            print(f"Zweiter Fork fehlgeschlagen: {e}")
-            sys.exit(1)
-        
-        # Daemon-Prozess: eigene PID in Datei schreiben
+        # Starte einen komplett neuen Python-Prozess (kein fork),
+        # damit kein PulseAudio-Zustand aus dem Elternprozess vererbt wird.
+        subprocess.Popen(
+            [sys.executable, str(Path(__file__).resolve()), '_daemon'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            close_fds=True,
+        )
+
+        # Warte bis der Daemon seine PID geschrieben hat
+        for _ in range(50):  # bis zu 5 Sekunden
+            time.sleep(0.1)
+            daemon_pid = self._read_pid()
+            if daemon_pid:
+                print(f"Service gestartet (PID: {daemon_pid})")
+                return True
+        print("Service konnte nicht gestartet werden (Timeout)")
+        return False
+
+    def _run_as_daemon(self):
+        """Wird als eigenst\u00e4ndiger Daemon-Prozess ausgef\u00fchrt"""
         self._write_pid(os.getpid())
 
-        # Umleitung der Standard-Streams
-        sys.stdout.flush()
-        sys.stderr.flush()
-        
         log_dir = Path.home() / ".config" / "gateway-auto-mute"
         log_file = log_dir / "service.log"
-        
-        with open(log_file, 'a') as f:
-            os.dup2(f.fileno(), sys.stdout.fileno())
-            os.dup2(f.fileno(), sys.stderr.fileno())
-        
-        # Service-Logik
+
+        # Log-Datei \u00f6ffnen und stdout/stderr umleiten
+        log_fh = open(log_file, 'a', buffering=1)
+        sys.stdout = log_fh
+        sys.stderr = log_fh
+
         def status_callback(msg):
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            print(f"[{timestamp}] {msg}")
-            sys.stdout.flush()
-        
+            print(f"[{timestamp}] {msg}", flush=True)
+
         controller = AudioController(self.config, status_callback)
-        
+
         def signal_handler(signum, frame):
-            print(f"Signal {signum} empfangen, beende Service...")
+            print(f"Signal {signum} empfangen, beende Service...", flush=True)
             controller.stop()
             self._delete_pid()
             sys.exit(0)
-        
+
         signal.signal(signal.SIGTERM, signal_handler)
         signal.signal(signal.SIGINT, signal_handler)
-        
+
         controller.start()
-        
-        # Halte Daemon am Leben
+
         while controller.is_running():
             time.sleep(1)
-        
+
         self._delete_pid()
         sys.exit(0)
     
@@ -236,7 +219,10 @@ def main():
     if command == "start":
         success = manager.start()
         sys.exit(0 if success else 1)
-    
+
+    elif command == "_daemon":
+        manager._run_as_daemon()
+
     elif command == "stop":
         success = manager.stop()
         sys.exit(0 if success else 1)
