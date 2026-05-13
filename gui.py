@@ -340,25 +340,29 @@ class AutoMuteGUI:
 
         left_row = 0
 
-        # === Service-Steuerung ===
-        service_frame = ttk.LabelFrame(left_frame, text="Service-Steuerung", padding="10")
+        # === In-Process Controller ===
+        service_frame = ttk.LabelFrame(left_frame, text="In-Process Controller", padding="10")
         service_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         left_row += 1
+
+        ttk.Label(service_frame,
+                  text="Startet den Audio-Controller direkt in der GUI (z.\u202fB. zum Testen).",
+                  foreground="gray").pack(anchor=tk.W, pady=(0, 6))
 
         button_frame = ttk.Frame(service_frame)
         button_frame.pack(fill=tk.X)
 
-        self.start_button = ttk.Button(button_frame, text="Service starten", command=self._start_service)
+        self.start_button = ttk.Button(button_frame, text="Im Prozess starten", command=self._start_service)
         self.start_button.pack(side=tk.LEFT, padx=5)
 
-        self.stop_button = ttk.Button(button_frame, text="Service stoppen",
+        self.stop_button = ttk.Button(button_frame, text="Im Prozess stoppen",
                                       command=self._stop_service, state=tk.DISABLED)
         self.stop_button.pack(side=tk.LEFT, padx=5)
 
         ttk.Button(button_frame, text="Konfiguration speichern",
                    command=self._save_config).pack(side=tk.LEFT, padx=5)
 
-        ttk.Button(button_frame, text="Zurücksetzen",
+        ttk.Button(button_frame, text="Zur\u00fccksetzen",
                    command=self._reset_config).pack(side=tk.LEFT, padx=5)
 
         # === Pegel und Schwellwerte ===
@@ -452,16 +456,20 @@ class AutoMuteGUI:
         status_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.status_text.config(yscrollcommand=status_scrollbar.set)
 
-        # === Service-Aktionen ===
-        cmd_frame = ttk.LabelFrame(right_frame, text="Service-Aktionen", padding="10")
+        # === Hintergrund-Service (Daemon) ===
+        cmd_frame = ttk.LabelFrame(right_frame, text="Hintergrund-Service (Daemon)", padding="10")
         cmd_frame.grid(row=right_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         right_row += 1
 
+        ttk.Label(cmd_frame,
+                  text="Steuert den dauerhaft laufenden\nHintergrund-Dienst.",
+                  foreground="gray").pack(anchor=tk.W, pady=(0, 6))
+
         actions = [
-            ("Service starten",          self._start_service),
-            ("Service stoppen",           self._stop_service),
-            ("Service neu laden (reload)", self._reload_service),
-            ("Service-Status anzeigen",   self._show_service_status),
+            ("Daemon starten",            self._start_daemon),
+            ("Daemon stoppen",            self._stop_daemon),
+            ("Daemon neu laden (reload)", self._reload_service),
+            ("Daemon-Status anzeigen",    self._show_service_status),
         ]
 
         for label, cmd in actions:
@@ -475,6 +483,24 @@ class AutoMuteGUI:
             self._update_status(f"In Zwischenablage kopiert: {text}")
         except Exception as e:
             messagebox.showerror("Fehler", f"Konnte nicht in Zwischenablage kopieren: {e}")
+
+    def _start_daemon(self):
+        """Startet den Audio-Controller als Hintergrund-Daemon"""
+        if self._external_service:
+            messagebox.showwarning("Warnung", "Hintergrund-Daemon läuft bereits.")
+            return
+        self._update_status("Starte Hintergrund-Daemon...")
+        self._service_manager.start()
+        # _check_external_service_status erkennt den neuen Prozess automatisch
+
+    def _stop_daemon(self):
+        """Stoppt den Hintergrund-Daemon"""
+        if not self._external_service:
+            messagebox.showinfo("Info", "Kein Hintergrund-Daemon läuft.")
+            return
+        if messagebox.askyesno("Bestätigen", "Den Hintergrund-Daemon stoppen?"):
+            self._service_manager.stop()
+            # Button-Zustand wird durch _check_external_service_status aktualisiert
 
     def _reload_service(self):
         """Stoppt und startet den laufenden Daemon-Service neu"""
@@ -551,29 +577,23 @@ class AutoMuteGUI:
             self._update_status(f"Mikrofon gewählt: {selected}")
     
     def _start_service(self):
-        """Startet den Audio-Controller-Service"""
+        """Startet den Audio-Controller im Prozess (In-Process)"""
         if self._external_service:
             messagebox.showwarning("Warnung",
-                                   "Ein externer Service läuft bereits.\n"
-                                   "Bitte zuerst den externen Service stoppen.")
+                                   "Ein Hintergrund-Daemon läuft bereits.\n"
+                                   "Bitte zuerst den Daemon stoppen.")
             return
         if self.audio_controller.start():
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
         else:
-            messagebox.showwarning("Warnung", "Service läuft bereits")
+            messagebox.showwarning("Warnung", "In-Process Controller läuft bereits")
 
     def _stop_service(self):
-        """Stoppt den Audio-Controller-Service"""
-        if self._external_service:
-            if messagebox.askyesno("Bestätigen",
-                                   "Den extern laufenden Daemon-Service stoppen?"):
-                self._service_manager.stop()
-                # Button-Zustand wird durch _check_external_service_status aktualisiert
-        else:
-            self.audio_controller.stop()
-            self.start_button.config(state=tk.NORMAL)
-            self.stop_button.config(state=tk.DISABLED)
+        """Stoppt den In-Process Audio-Controller"""
+        self.audio_controller.stop()
+        self.start_button.config(state=tk.NORMAL)
+        self.stop_button.config(state=tk.DISABLED)
     
     def _save_config(self):
         """Speichert die Konfiguration"""
