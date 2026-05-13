@@ -12,6 +12,7 @@ import queue
 import sys
 from config import Config
 from audio_controller import AudioController
+from service_manager import ServiceManager
 
 
 class ConfigSlider(ttk.Frame):
@@ -190,11 +191,15 @@ class AutoMuteGUI:
         self._msg_queue: queue.SimpleQueue = queue.SimpleQueue()
         self.audio_controller = AudioController(self.config, self._status_callback,
                                                 self._level_callback)
+        self._service_manager = ServiceManager()
+        self._external_service = False   # True wenn Daemon-Prozess läuft
+        self._log_file_pos = 0           # Leseposition im Service-Log
 
         self._create_widgets()
         self._load_devices()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_queue()
+        self._check_external_service_status()  # Prüfe ob Daemon bereits läuft
         
     def _mark_dirty(self):
         """Markiert die Konfiguration als ungespeichert"""
@@ -522,17 +527,28 @@ class AutoMuteGUI:
     
     def _start_service(self):
         """Startet den Audio-Controller-Service"""
+        if self._external_service:
+            messagebox.showwarning("Warnung",
+                                   "Ein externer Service läuft bereits.\n"
+                                   "Bitte zuerst den externen Service stoppen.")
+            return
         if self.audio_controller.start():
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
         else:
             messagebox.showwarning("Warnung", "Service läuft bereits")
-    
+
     def _stop_service(self):
         """Stoppt den Audio-Controller-Service"""
-        self.audio_controller.stop()
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
+        if self._external_service:
+            if messagebox.askyesno("Bestätigen",
+                                   "Den extern laufenden Daemon-Service stoppen?"):
+                self._service_manager.stop()
+                # Button-Zustand wird durch _check_external_service_status aktualisiert
+        else:
+            self.audio_controller.stop()
+            self.start_button.config(state=tk.NORMAL)
+            self.stop_button.config(state=tk.DISABLED)
     
     def _save_config(self):
         """Speichert die Konfiguration"""
@@ -550,6 +566,66 @@ class AutoMuteGUI:
             self._update_status("Konfiguration zurückgesetzt")
             messagebox.showinfo("Info", "Bitte starten Sie die Anwendung neu, um die Standardwerte zu laden")
     
+    def _check_external_service_status(self):
+        """Prüft periodisch ob der Daemon-Service bereits läuft und verbindet das GUI damit"""
+        if not self._alive:
+            return
+        pid = self._service_manager._read_pid()
+        external_running = self._service_manager._is_process_running(pid)
+
+        if external_running and not self._external_service:
+            # Daemon wurde neu erkannt
+            self._external_service = True
+            self._update_status(f"Externer Service erkannt (PID: {pid}) – verbinde...")
+            self.start_button.config(state=tk.DISABLED)
+            self.stop_button.config(state=tk.NORMAL)
+            # Letzte Log-Zeilen als Kontext anzeigen, dann ab dort weiter lesen
+            log_file = Path.home() / ".config" / "gateway-auto-mute" / "service.log"
+            if log_file.exists():
+                try:
+                    with open(log_file, 'r') as f:
+                        lines = f.readlines()
+                        for line in lines[-5:]:
+                            if line.strip():
+                                self._update_status(f"[Log] {line.strip()}")
+                        self._log_file_pos = log_file.stat().st_size
+                except Exception:
+                    self._log_file_pos = 0
+
+        elif not external_running and self._external_service:
+            # Daemon wurde gestoppt
+            self._external_service = False
+            self._update_status("Externer Service gestoppt")
+            if not self.audio_controller.is_running():
+                self.start_button.config(state=tk.NORMAL)
+                self.stop_button.config(state=tk.DISABLED)
+
+        if self._external_service:
+            self._tail_log_file()
+
+        self.root.after(2000, self._check_external_service_status)
+
+    def _tail_log_file(self):
+        """Liest neue Zeilen aus der Service-Log-Datei und zeigt sie im Status-Panel"""
+        log_file = Path.home() / ".config" / "gateway-auto-mute" / "service.log"
+        if not log_file.exists():
+            return
+        try:
+            current_size = log_file.stat().st_size
+            if current_size < self._log_file_pos:
+                # Log-Datei wurde rotiert oder geleert
+                self._log_file_pos = 0
+            if current_size > self._log_file_pos:
+                with open(log_file, 'r') as f:
+                    f.seek(self._log_file_pos)
+                    new_content = f.read()
+                    self._log_file_pos = f.tell()
+                for line in new_content.splitlines():
+                    if line.strip():
+                        self._update_status(line.strip())
+        except Exception:
+            pass
+
     def run(self):
         """Startet die GUI"""
         self._update_status("Gateway Auto-Mute gestartet")
