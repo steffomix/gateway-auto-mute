@@ -10,6 +10,7 @@ import pyperclip
 from pathlib import Path
 import queue
 import sys
+import webbrowser
 from config import Config
 from audio_controller import AudioController
 from service_manager import ServiceManager
@@ -18,8 +19,11 @@ from service_manager import ServiceManager
 class ConfigSlider(ttk.Frame):
     """Benutzerdefinierter Schieberegler mit Min/Max-Textfeldern und optionalem Pegelanzeige-Balken"""
 
+    CURVE_EXPONENT = 2.0  # Quadratische Kurve: mehr Präzision im unteren Bereich
+
     def __init__(self, parent, label, config_key, config: Config,
-                 min_key, max_key, unit="", on_change=None, show_level_meter=False, **kwargs):
+                 min_key, max_key, unit="", on_change=None, show_level_meter=False,
+                 curved=False, show_ticks=False, **kwargs):
         super().__init__(parent, **kwargs)
         self.config = config
         self.config_key = config_key
@@ -27,6 +31,8 @@ class ConfigSlider(ttk.Frame):
         self.max_key = max_key
         self.on_change = on_change
         self.unit = unit
+        self.curved = curved
+        self.show_ticks = show_ticks
         self._meter_level = 0.0
 
         # row 0: Label
@@ -54,13 +60,26 @@ class ConfigSlider(ttk.Frame):
         min_entry.bind('<Return>', self._on_min_changed)
 
         # Slider
-        self.value_var = tk.DoubleVar(value=config.get(config_key, 0))
+        actual_val = config.get(config_key, 0)
+        min_val_init = config.get(min_key, 0)
+        max_val_init = config.get(max_key, 100)
+        self.value_var = tk.DoubleVar(value=actual_val)
+        if curved:
+            self._pos_var = tk.DoubleVar(
+                value=self._val_to_pos(actual_val, min_val_init, max_val_init))
+            slider_from_, slider_to = 0.0, 1000.0
+            slider_var = self._pos_var
+        else:
+            self._pos_var = self.value_var
+            slider_from_ = float(min_val_init)
+            slider_to = float(max_val_init)
+            slider_var = self.value_var
         self.slider = ttk.Scale(
             self,
-            from_=config.get(min_key, 0),
-            to=config.get(max_key, 100),
+            from_=slider_from_,
+            to=slider_to,
             orient=tk.HORIZONTAL,
-            variable=self.value_var,
+            variable=slider_var,
             command=self._on_slider_changed
         )
         self.slider.grid(row=slider_row, column=2, sticky=tk.EW, padx=5)
@@ -75,8 +94,17 @@ class ConfigSlider(ttk.Frame):
         max_entry.bind('<Return>', self._on_max_changed)
 
         # Aktueller Wert
-        self.current_label = ttk.Label(self, text=f"{self.value_var.get():.1f} {unit}")
+        self.current_label = ttk.Label(self, text=f"{actual_val:.1f} {unit}")
         self.current_label.grid(row=label_row, column=0, columnspan=5, sticky=tk.W)
+
+        # Tick-Striche unter dem Schieberegler
+        if show_ticks:
+            self.tick_canvas = tk.Canvas(self, height=14, highlightthickness=0, bd=0)
+            self.tick_canvas.grid(row=label_row + 1, column=2, sticky=tk.EW, padx=5,
+                                  pady=(0, 2))
+            self.tick_canvas.bind('<Configure>', lambda e: self._draw_ticks())
+        else:
+            self.tick_canvas = None
 
     def update_level(self, level_percent: float):
         """Aktualisiert den angezeigten Audiopegel im Meter"""
@@ -126,8 +154,18 @@ class ConfigSlider(ttk.Frame):
     
     def _on_slider_changed(self, value):
         """Callback wenn Slider bewegt wird"""
-        self.current_label.config(text=f"{float(value):.1f} {self.unit}")
-        self.config.set(self.config_key, float(value))
+        if self.curved:
+            try:
+                min_val = float(self.min_var.get())
+                max_val = float(self.max_var.get())
+            except ValueError:
+                return
+            actual = self._pos_to_val(float(value), min_val, max_val)
+            self.value_var.set(actual)
+        else:
+            actual = float(value)
+        self.current_label.config(text=f"{actual:.1f} {self.unit}")
+        self.config.set(self.config_key, actual)
         if self.on_change:
             self.on_change()
         self._draw_meter()
@@ -139,15 +177,19 @@ class ConfigSlider(ttk.Frame):
             max_val = float(self.max_var.get())
             if min_val < max_val:
                 self.config.set(self.min_key, min_val)
-                self.slider.config(from_=min_val)
-                # Stelle sicher, dass aktueller Wert im gültigen Bereich ist
                 current = self.value_var.get()
                 if current < min_val:
-                    self.value_var.set(min_val)
-                    self.config.set(self.config_key, min_val)
+                    current = min_val
+                    self.value_var.set(current)
+                    self.config.set(self.config_key, current)
+                if self.curved:
+                    self._pos_var.set(self._val_to_pos(current, min_val, max_val))
+                else:
+                    self.slider.config(from_=min_val)
                 if self.on_change:
                     self.on_change()
                 self._draw_meter()
+                self._draw_ticks()
         except ValueError:
             messagebox.showerror("Fehler", "Ungültiger Wert für Minimum")
             self.min_var.set(str(self.config.get(self.min_key, 0)))
@@ -159,19 +201,82 @@ class ConfigSlider(ttk.Frame):
             max_val = float(self.max_var.get())
             if max_val > min_val:
                 self.config.set(self.max_key, max_val)
-                self.slider.config(to=max_val)
-                # Stelle sicher, dass aktueller Wert im gültigen Bereich ist
                 current = self.value_var.get()
                 if current > max_val:
-                    self.value_var.set(max_val)
-                    self.config.set(self.config_key, max_val)
+                    current = max_val
+                    self.value_var.set(current)
+                    self.config.set(self.config_key, current)
+                if self.curved:
+                    self._pos_var.set(self._val_to_pos(current, min_val, max_val))
+                else:
+                    self.slider.config(to=max_val)
                 if self.on_change:
                     self.on_change()
                 self._draw_meter()
+                self._draw_ticks()
         except ValueError:
             messagebox.showerror("Fehler", "Ungültiger Wert für Maximum")
             self.max_var.set(str(self.config.get(self.max_key, 100)))
     
+    def _val_to_pos(self, val: float, min_val: float, max_val: float) -> float:
+        """Tatsächlicher Wert → interne Slider-Position (0..1000, quadratische Kurve)"""
+        if max_val <= min_val:
+            return 0.0
+        t = (val - min_val) / (max_val - min_val)
+        t = max(0.0, min(1.0, t))
+        return (t ** (1.0 / self.CURVE_EXPONENT)) * 1000.0
+
+    def _pos_to_val(self, pos: float, min_val: float, max_val: float) -> float:
+        """Interne Slider-Position (0..1000) → tatsächlicher Wert (quadratische Kurve)"""
+        t = max(0.0, min(1.0, pos / 1000.0))
+        return min_val + (max_val - min_val) * (t ** self.CURVE_EXPONENT)
+
+    def _draw_ticks(self):
+        """Zeichnet Tick-Striche alle 5% des Wertebereichs unter dem Schieberegler"""
+        if not self.tick_canvas:
+            return
+        w = self.tick_canvas.winfo_width()
+        if w <= 1:
+            return
+        try:
+            min_val = float(self.min_var.get())
+            max_val = float(self.max_var.get())
+        except ValueError:
+            return
+        if max_val <= min_val:
+            return
+        h = self.tick_canvas.winfo_height()
+        try:
+            bg = str(self.winfo_toplevel().cget('background'))
+        except tk.TclError:
+            bg = '#f0f0f0'
+        self.tick_canvas.config(bg=bg)
+        self.tick_canvas.delete("all")
+        step = 5.0
+        tick_val = (int(min_val / step) + 1) * step
+        while tick_val <= max_val + 1e-9:
+            if self.curved:
+                x = self._val_to_pos(tick_val, min_val, max_val) / 1000.0 * w
+            else:
+                x = (tick_val - min_val) / (max_val - min_val) * w
+            self.tick_canvas.create_line(int(x), 0, int(x), h - 1, fill='#888888')
+            tick_val += step
+
+    def set_value(self, val: float):
+        """Setzt den Wert programmatisch ohne on_change auszulösen"""
+        try:
+            min_val = float(self.min_var.get())
+            max_val = float(self.max_var.get())
+        except ValueError:
+            return
+        val = max(min_val, min(max_val, val))
+        self.value_var.set(val)
+        if self.curved:
+            self._pos_var.set(self._val_to_pos(val, min_val, max_val))
+        self.current_label.config(text=f"{val:.1f} {self.unit}")
+        self.config.set(self.config_key, val)
+        self._draw_meter()
+
     def get_value(self):
         """Gibt den aktuellen Wert zurück"""
         return self.value_var.get()
@@ -202,6 +307,24 @@ class AutoMuteGUI:
         self._poll_queue()
         self._check_external_service_status()  # Prüfe ob Daemon bereits läuft
         
+    _MIC_LEVEL_GAP = 1.0  # Mindestabstand zwischen gedämpftem und normalem Pegel
+
+    def _on_muted_level_changed(self):
+        """Stellt sicher dass gedämpfter Pegel unter dem normalen bleibt"""
+        muted = self.mic_muted_slider.get_value()
+        normal = self.mic_normal_slider.get_value()
+        if muted >= normal:
+            self.mic_normal_slider.set_value(muted + self._MIC_LEVEL_GAP)
+        self._mark_dirty()
+
+    def _on_normal_level_changed(self):
+        """Stellt sicher dass normaler Pegel über dem gedämpften bleibt"""
+        muted = self.mic_muted_slider.get_value()
+        normal = self.mic_normal_slider.get_value()
+        if normal <= muted:
+            self.mic_muted_slider.set_value(normal - self._MIC_LEVEL_GAP)
+        self._mark_dirty()
+
     def _mark_dirty(self):
         """Markiert die Konfiguration als ungespeichert"""
         self._changes_made = True
@@ -379,27 +502,32 @@ class AutoMuteGUI:
             "Lautstärke-Schwellwert (ab diesem Pegel wird Mikrofon gedämpft)",
             "volume_threshold", self.config,
             "volume_threshold_min", "volume_threshold_max",
-            unit="%", on_change=self._mark_dirty, show_level_meter=True
+            unit="%", on_change=self._mark_dirty, show_level_meter=True,
+            curved=True, show_ticks=True
         )
         self.volume_threshold_slider.pack(fill=tk.X, pady=5)
-
-        self.mic_normal_slider = ConfigSlider(
-            levels_frame,
-            "Normaler Mikrofon-Pegel",
-            "mic_normal_level", self.config,
-            "mic_normal_level_min", "mic_normal_level_max",
-            unit="%", on_change=self._mark_dirty
-        )
-        self.mic_normal_slider.pack(fill=tk.X, pady=5)
 
         self.mic_muted_slider = ConfigSlider(
             levels_frame,
             "Gedämpfter Mikrofon-Pegel",
             "mic_muted_level", self.config,
             "mic_muted_level_min", "mic_muted_level_max",
-            unit="%", on_change=self._mark_dirty
+            unit="%", on_change=self._mark_dirty, curved=True, show_ticks=True
         )
         self.mic_muted_slider.pack(fill=tk.X, pady=5)
+
+        self.mic_normal_slider = ConfigSlider(
+            levels_frame,
+            "Normaler Mikrofon-Pegel",
+            "mic_normal_level", self.config,
+            "mic_normal_level_min", "mic_normal_level_max",
+            unit="%", on_change=self._mark_dirty, show_ticks=True
+        )
+        self.mic_normal_slider.pack(fill=tk.X, pady=5)
+
+        # Gegenseitige Begrenzung der Mikrofon-Pegel
+        self.mic_muted_slider.on_change = self._on_muted_level_changed
+        self.mic_normal_slider.on_change = self._on_normal_level_changed
 
         # === Zeiteinstellungen ===
         time_frame = ttk.LabelFrame(left_frame, text="Zeiteinstellungen", padding="10")
@@ -443,6 +571,44 @@ class AutoMuteGUI:
 
         ttk.Button(device_frame, text="Geräte aktualisieren",
                    command=self._load_devices).grid(row=2, column=0, columnspan=2, pady=(10, 0))
+
+        # === Info ===
+        info_frame = ttk.LabelFrame(left_frame, text="Info", padding="10")
+        info_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        left_row += 1
+
+        _config_dir = str(Path.home() / ".config" / "gateway-auto-mute")
+        _install_dir = str(Path(__file__).parent.resolve())
+        _github_url = "https://github.com/steffomix/gateway-auto-mute"
+        _info_text = (
+            "Wichtige Verzeichnisse:\n"
+            f"  Konfiguration & Logs:  {_config_dir}\n"
+            f"  Programm:              {_install_dir}\n"
+            "\n"
+            "Quellcode auf GitHub:\n"
+            f"  {_github_url}\n"
+            "\n"
+            "Dieses Programm wäre ohne die Unterstützung von\n"
+            "Claude AI (Anthropic) nicht möglich gewesen.\n"
+            "Vielen Dank!"
+        )
+        info_text = tk.Text(info_frame, height=10, wrap=tk.WORD, relief=tk.FLAT,
+                            bg=self.root.cget('background'),
+                            font=('TkDefaultFont', 9), cursor="arrow")
+        info_text.insert(tk.END, _info_text)
+        # Link klickbar machen
+        link_start = _info_text.index(_github_url)
+        link_end = link_start + len(_github_url)
+        info_text.tag_add("link", f"1.0 + {link_start}c", f"1.0 + {link_end}c")
+        info_text.tag_config("link", foreground="#1a73e8", underline=True)
+        info_text.tag_bind("link", "<Button-1>",
+                           lambda e: webbrowser.open(_github_url))
+        info_text.tag_bind("link", "<Enter>",
+                           lambda e: info_text.config(cursor="hand2"))
+        info_text.tag_bind("link", "<Leave>",
+                           lambda e: info_text.config(cursor="arrow"))
+        info_text.config(state=tk.DISABLED)
+        info_text.pack(fill=tk.X)
 
         # ── RECHTE SPALTE ─────────────────────────────────────────
 
