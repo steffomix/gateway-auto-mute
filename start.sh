@@ -5,4 +5,4 @@
 cd "$(dirname "$0")"
 
 # Starte die GUI mit der virtuellen Umgebung
-./venv/bin/python gui.py
+./.venv/bin/python gui.py
