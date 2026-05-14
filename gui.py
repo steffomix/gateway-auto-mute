@@ -732,7 +732,7 @@ class AutoMuteGUI:
             messagebox.showinfo("Info", "Service läuft nicht – nichts zu neu laden.")
 
     def _show_service_status(self):
-        """Zeigt Daemon-Status und gespeicherte Konfiguration in einem Dialog"""
+        """Zeigt Daemon-Status und gespeicherte Konfiguration im Log-Textfenster"""
         pid = self._service_manager._read_pid()
         running = self._service_manager._is_process_running(pid)
         in_process = self.audio_controller.is_running()
@@ -741,35 +741,33 @@ class AutoMuteGUI:
         saved_cfg = Config()
         cfg = saved_cfg.get_all()
 
-        lines = []
         if running:
-            lines.append(f"Daemon-Status: läuft (PID: {pid})")
+            self._update_status(f"Daemon-Status: läuft (PID: {pid})")
         elif in_process:
-            lines.append("Daemon-Status: In-Process-Service läuft")
+            self._update_status("Daemon-Status: In-Process-Service läuft")
         else:
-            lines.append("Daemon-Status: gestoppt")
+            self._update_status("Daemon-Status: gestoppt")
 
-        lines.append("")
-        lines.append("── Gespeicherte Konfiguration ──")
-        lines.append(f"Lautsprecher:           {cfg.get('speaker_device') or '–'}")
-        lines.append(f"Mikrofon:               {cfg.get('microphone_device') or '–'}")
-        lines.append(
+        self._update_status("── Gespeicherte Konfiguration ──")
+        self._update_status(f"Lautsprecher:           {cfg.get('speaker_device') or '–'}")
+        self._update_status(f"Mikrofon:               {cfg.get('microphone_device') or '–'}")
+        self._update_status(
             f"Lautstärke-Schwellwert: {cfg.get('volume_threshold', 0):.1f}%"
             f"  (Min: {cfg.get('volume_threshold_min', 0)}, Max: {cfg.get('volume_threshold_max', 100)})"
         )
-        lines.append(
+        self._update_status(
             f"Mic Normal-Pegel:       {cfg.get('mic_normal_level', 0):.1f}%"
             f"  (Min: {cfg.get('mic_normal_level_min', 0)}, Max: {cfg.get('mic_normal_level_max', 100)})"
         )
-        lines.append(
+        self._update_status(
             f"Mic Gedämpft-Pegel:     {cfg.get('mic_muted_level', 0):.1f}%"
             f"  (Min: {cfg.get('mic_muted_level_min', 0)}, Max: {cfg.get('mic_muted_level_max', 100)})"
         )
-        lines.append(
+        self._update_status(
             f"Haltezeit:              {cfg.get('hold_time', 0):.0f} ms"
             f"  (Min: {cfg.get('hold_time_min', 0)}, Max: {cfg.get('hold_time_max', 5000)})"
         )
-        lines.append(
+        self._update_status(
             f"Messintervall:          {cfg.get('polling_interval', 0):.0f} ms"
             f"  (Min: {cfg.get('polling_interval_min', 10)}, Max: {cfg.get('polling_interval_max', 1000)})"
         )
@@ -785,33 +783,17 @@ class AutoMuteGUI:
                 pass
 
             if config_changed:
-                lines.append("")
-                lines.append("Die gespeicherte Konfiguration wurde geaendert,")
-                lines.append("nachdem der Daemon gestartet wurde.")
+                self._update_status("Die gespeicherte Konfiguration wurde geändert, nachdem der Daemon gestartet wurde.")
+                if messagebox.askyesno(
+                    "Konfiguration geändert",
+                    "Die gespeicherte Konfiguration wurde geändert,\n"
+                    "nachdem der Daemon gestartet wurde.\n\n"
+                    "Soll der Daemon jetzt neu geladen werden (reload)?",
+                    icon='warning'
+                ):
+                    self._reload_service()
             else:
-                lines.append("")
-                lines.append("Konfiguration stimmt mit laufendem Daemon ueberein.")
-
-        message = "\n".join(lines)
-
-        if running and config_changed:
-            answer = messagebox.askyesno(
-                "Daemon-Status",
-                message + "\n\nSoll der Daemon jetzt neu geladen werden (reload)?",
-                icon='warning'
-            )
-            if answer:
-                self._reload_service()
-        else:
-            messagebox.showinfo("Daemon-Status", message)
-
-        # Statuszeile aktualisieren
-        if running:
-            self._update_status(f"Daemon-Status: läuft (PID: {pid})")
-        elif in_process:
-            self._update_status("Daemon-Status: In-Process-Service läuft")
-        else:
-            self._update_status("Daemon-Status: gestoppt")
+                self._update_status("Konfiguration stimmt mit laufendem Daemon überein.")
 
     # ── Systemd Installations-Helfer ────────────────────────────
 
