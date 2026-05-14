@@ -131,8 +131,12 @@ class ConfigSlider(ttk.Frame):
         level = self._meter_level
         threshold = self.value_var.get()
 
-        level_x = max(0, min(w, (level - min_val) / val_range * w))
-        threshold_x = max(0, min(w - 1, (threshold - min_val) / val_range * w))
+        if self.curved:
+            level_x = max(0, min(w, self._val_to_pos(level, min_val, max_val) / 1000.0 * w))
+            threshold_x = max(0, min(w - 1, self._val_to_pos(threshold, min_val, max_val) / 1000.0 * w))
+        else:
+            level_x = max(0, min(w, (level - min_val) / val_range * w))
+            threshold_x = max(0, min(w - 1, (threshold - min_val) / val_range * w))
 
         self.meter_canvas.delete("all")
 
@@ -546,7 +550,7 @@ class AutoMuteGUI:
 
         self.polling_slider = ConfigSlider(
             time_frame,
-            "Messintervall (min. 100ms) - Erfordert Neustart des Services",
+            "Messintervall (wie oft wird die Lautstärke geprüft)",
             "polling_interval", self.config,
             "polling_interval_min", "polling_interval_max",
             unit="ms", on_change=self._mark_dirty
@@ -786,9 +790,11 @@ class AutoMuteGUI:
             subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, timeout=10)
             subprocess.run(["systemctl", "--user", "enable", "gateway-auto-mute.service"],
                            check=True, timeout=10)
+            subprocess.run(["systemctl", "--user", "start", "gateway-auto-mute.service"],
+                           check=True, timeout=15)
             messagebox.showinfo(
                 "Erfolg",
-                "Service wurde installiert und aktiviert.\n\n"
+                "Service wurde installiert, aktiviert und gestartet.\n\n"
                 "Er startet nun automatisch beim Benutzer-Login.\n"
                 f"Installiert nach:\n{dst}")
         except subprocess.CalledProcessError as e:
