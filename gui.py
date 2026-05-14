@@ -194,6 +194,7 @@ class AutoMuteGUI:
         self._service_manager = ServiceManager()
         self._external_service = False   # True wenn Daemon-Prozess läuft
         self._log_file_pos = 0           # Leseposition im Service-Log
+        self._changes_made = False       # True sobald irgendeine Änderung gemacht wurde
 
         self._create_widgets()
         self._load_devices()
@@ -203,6 +204,7 @@ class AutoMuteGUI:
         
     def _mark_dirty(self):
         """Markiert die Konfiguration als ungespeichert"""
+        self._changes_made = True
         if not self.unsaved_changes:
             self.unsaved_changes = True
             self.root.title("Gateway Auto-Mute Konfiguration *")
@@ -214,6 +216,7 @@ class AutoMuteGUI:
 
     def _on_close(self):
         """Behandelt das Schließen des Fensters"""
+        saved = False
         if self.unsaved_changes:
             answer = messagebox.askyesnocancel(
                 "Ungespeicherte Änderungen",
@@ -224,10 +227,11 @@ class AutoMuteGUI:
             if answer:  # Ja
                 self.config.save()
                 self._mark_clean()
-        # Reload-Nachfrage wenn ein Service läuft
+                saved = True
+        # Reload-Nachfrage nur wenn Änderungen tatsächlich gespeichert wurden
         service_running = (self._external_service
                            or self.audio_controller.is_running())
-        if service_running:
+        if service_running and saved:
             if messagebox.askyesno(
                 "Service neu laden",
                 "Soll der laufende Service jetzt neu geladen werden,\n"
