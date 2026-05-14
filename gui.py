@@ -52,13 +52,11 @@ class ConfigSlider(ttk.Frame):
             slider_row = 1
             label_row = 2
 
-        # Min-Wert Eingabe
+        # Min-Wert Anzeige (schreibgeschützt – nur via Konfigurationsdatei änderbar)
         ttk.Label(self, text="Min:").grid(row=slider_row, column=0, padx=(0, 5))
         self.min_var = tk.StringVar(value=str(config.get(min_key, 0)))
-        min_entry = ttk.Entry(self, textvariable=self.min_var, width=8)
+        min_entry = ttk.Entry(self, textvariable=self.min_var, width=8, state='readonly')
         min_entry.grid(row=slider_row, column=1, padx=(0, 10))
-        min_entry.bind('<FocusOut>', self._on_min_changed)
-        min_entry.bind('<Return>', self._on_min_changed)
 
         # Slider
         actual_val = config.get(config_key, 0)
@@ -86,13 +84,11 @@ class ConfigSlider(ttk.Frame):
         self.slider.grid(row=slider_row, column=2, sticky=tk.EW, padx=5)
         self.columnconfigure(2, weight=1)
 
-        # Max-Wert Eingabe
+        # Max-Wert Anzeige (schreibgeschützt – nur via Konfigurationsdatei änderbar)
         ttk.Label(self, text="Max:").grid(row=slider_row, column=3, padx=(10, 5))
         self.max_var = tk.StringVar(value=str(config.get(max_key, 100)))
-        max_entry = ttk.Entry(self, textvariable=self.max_var, width=8)
+        max_entry = ttk.Entry(self, textvariable=self.max_var, width=8, state='readonly')
         max_entry.grid(row=slider_row, column=4)
-        max_entry.bind('<FocusOut>', self._on_max_changed)
-        max_entry.bind('<Return>', self._on_max_changed)
 
         # Aktueller Wert
         self.current_label = ttk.Label(self, text=f"{actual_val:.1f} {unit}")
@@ -736,12 +732,83 @@ class AutoMuteGUI:
             messagebox.showinfo("Info", "Service läuft nicht – nichts zu neu laden.")
 
     def _show_service_status(self):
-        """Zeigt Daemon-Status im Status-Panel"""
+        """Zeigt Daemon-Status und gespeicherte Konfiguration in einem Dialog"""
         pid = self._service_manager._read_pid()
         running = self._service_manager._is_process_running(pid)
+        in_process = self.audio_controller.is_running()
+
+        # Frisch von Disk laden
+        saved_cfg = Config()
+        cfg = saved_cfg.get_all()
+
+        lines = []
+        if running:
+            lines.append(f"Daemon-Status: läuft (PID: {pid})")
+        elif in_process:
+            lines.append("Daemon-Status: In-Process-Service läuft")
+        else:
+            lines.append("Daemon-Status: gestoppt")
+
+        lines.append("")
+        lines.append("── Gespeicherte Konfiguration ──")
+        lines.append(f"Lautsprecher:           {cfg.get('speaker_device') or '–'}")
+        lines.append(f"Mikrofon:               {cfg.get('microphone_device') or '–'}")
+        lines.append(
+            f"Lautstärke-Schwellwert: {cfg.get('volume_threshold', 0):.1f}%"
+            f"  (Min: {cfg.get('volume_threshold_min', 0)}, Max: {cfg.get('volume_threshold_max', 100)})"
+        )
+        lines.append(
+            f"Mic Normal-Pegel:       {cfg.get('mic_normal_level', 0):.1f}%"
+            f"  (Min: {cfg.get('mic_normal_level_min', 0)}, Max: {cfg.get('mic_normal_level_max', 100)})"
+        )
+        lines.append(
+            f"Mic Gedämpft-Pegel:     {cfg.get('mic_muted_level', 0):.1f}%"
+            f"  (Min: {cfg.get('mic_muted_level_min', 0)}, Max: {cfg.get('mic_muted_level_max', 100)})"
+        )
+        lines.append(
+            f"Haltezeit:              {cfg.get('hold_time', 0):.0f} ms"
+            f"  (Min: {cfg.get('hold_time_min', 0)}, Max: {cfg.get('hold_time_max', 5000)})"
+        )
+        lines.append(
+            f"Messintervall:          {cfg.get('polling_interval', 0):.0f} ms"
+            f"  (Min: {cfg.get('polling_interval_min', 10)}, Max: {cfg.get('polling_interval_max', 1000)})"
+        )
+
+        # Prüfen ob Konfiguration seit Daemon-Start geändert wurde
+        config_changed = False
+        if running:
+            try:
+                pid_mtime = self._service_manager.pid_file.stat().st_mtime
+                cfg_mtime = saved_cfg.config_file.stat().st_mtime
+                config_changed = cfg_mtime > pid_mtime
+            except Exception:
+                pass
+
+            if config_changed:
+                lines.append("")
+                lines.append("Die gespeicherte Konfiguration wurde geaendert,")
+                lines.append("nachdem der Daemon gestartet wurde.")
+            else:
+                lines.append("")
+                lines.append("Konfiguration stimmt mit laufendem Daemon ueberein.")
+
+        message = "\n".join(lines)
+
+        if running and config_changed:
+            answer = messagebox.askyesno(
+                "Daemon-Status",
+                message + "\n\nSoll der Daemon jetzt neu geladen werden (reload)?",
+                icon='warning'
+            )
+            if answer:
+                self._reload_service()
+        else:
+            messagebox.showinfo("Daemon-Status", message)
+
+        # Statuszeile aktualisieren
         if running:
             self._update_status(f"Daemon-Status: läuft (PID: {pid})")
-        elif self.audio_controller.is_running():
+        elif in_process:
             self._update_status("Daemon-Status: In-Process-Service läuft")
         else:
             self._update_status("Daemon-Status: gestoppt")
