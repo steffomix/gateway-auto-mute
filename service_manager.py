@@ -80,14 +80,48 @@ class ServiceManager:
                 return True
         print("Service konnte nicht gestartet werden (Timeout)")
         return False
+    def _trim_log_file(self, log_file: Path, max_lines: int = 1000):
+        """Kürzt die Log-Datei: behält max. max_lines Zeilen, mind. alle Zeilen vom heutigen Tag"""
+        if not log_file.exists():
+            return
+        try:
+            with open(log_file, 'r', encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+        except Exception:
+            return
 
+        if len(lines) <= max_lines:
+            return
+
+        today = time.strftime("%Y-%m-%d")
+        # Ersten Index suchen, ab dem heutige Einträge beginnen
+        today_start = len(lines)
+        for i, line in enumerate(lines):
+            if today in line:
+                today_start = i
+                break
+
+        # Behalte mindestens max_lines Zeilen und alles ab today_start
+        keep_from = min(len(lines) - max_lines, today_start)
+        keep_from = max(0, keep_from)
+
+        if keep_from == 0:
+            return  # nichts zu kürzen
+
+        trimmed = lines[keep_from:]
+        try:
+            with open(log_file, 'w', encoding='utf-8') as f:
+                f.writelines(trimmed)
+        except Exception:
+            pass
     def _run_as_daemon(self):
         """Wird als eigenst\u00e4ndiger Daemon-Prozess ausgef\u00fchrt"""
         self._write_pid(os.getpid())
 
         log_dir = Path.home() / ".config" / "gateway-auto-mute"
         log_file = log_dir / "service.log"
-
+        # Log-Datei auf max. 1000 Zeilen kürzen, aber immer den heutigen Tag behalten
+        self._trim_log_file(log_file)
         # Log-Datei \u00f6ffnen und stdout/stderr umleiten
         log_fh = open(log_file, 'a', buffering=1)
         sys.stdout = log_fh
