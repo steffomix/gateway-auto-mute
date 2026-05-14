@@ -33,6 +33,7 @@ class AudioController:
         self._current_monitor_source: str = ""
         self._current_peak: float = 0.0
         self._MONITOR_RATE: int = 8000  # Hz, reicht für Pegelüberwachung
+        self._level_only_mode: bool = False  # True wenn nur Level-Monitoring aktiv
         
     def _update_status(self, message: str) -> None:
         """Sendet Statusmeldung an Callback"""
@@ -272,6 +273,39 @@ class AudioController:
         
         self._update_status("Service gestoppt")
     
+    def start_level_monitoring_only(self) -> bool:
+        """Startet nur den parec-Monitor-Stream für die Pegelanzeige, ohne die
+        vollständige Überwachungsschleife. Wird verwendet, wenn ein externer
+        Daemon läuft und die GUI nur den Audiopegel anzeigen soll."""
+        if self.running:
+            return False
+        speaker_name = self.config.get("speaker_device", "")
+        if not speaker_name:
+            return False
+        speaker = self._find_sink_by_name(speaker_name)
+        if not speaker:
+            return False
+        self.running = True
+        self._level_only_mode = True
+        if not self._start_monitor_stream(speaker.monitor_source_name):
+            self.running = False
+            self._level_only_mode = False
+            return False
+        return True
+
+    def stop_level_monitoring(self) -> None:
+        """Stoppt den Level-Only-Monitor-Stream."""
+        self.running = False
+        self._level_only_mode = False
+        self._stop_monitor_stream()
+
+    def is_level_monitoring(self) -> bool:
+        """Gibt True zurück wenn der Level-Monitor aktiv läuft."""
+        return (self.running
+                and self._level_only_mode
+                and self._monitor_process is not None
+                and self._monitor_process.poll() is None)
+
     def start(self) -> bool:
         """Startet den Überwachungs-Service"""
         if self.running:

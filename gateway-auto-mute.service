@@ -4,10 +4,8 @@ After=sound.target pulseaudio.service
 
 [Service]
 Type=simple
-User=%i
 WorkingDirectory=/home/stefan/.var/svc/gateway-auto-mute
-ExecStart=/home/stefan/.var/svc/gateway-auto-mute/.venv/bin/python3 /home/stefan/.var/svc/gateway-auto-mute/service_manager.py start
-ExecStop=/home/stefan/.var/svc/gateway-auto-mute/.venv/bin/python3 /home/stefan/.var/svc/gateway-auto-mute/service_manager.py stop
+ExecStart=/home/stefan/.var/svc/gateway-auto-mute/.venv/bin/python3 /home/stefan/.var/svc/gateway-auto-mute/service_manager.py _daemon
 Restart=on-failure
 RestartSec=5
 
