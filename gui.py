@@ -10,6 +10,7 @@ import pyperclip
 from pathlib import Path
 import queue
 import sys
+import subprocess
 import webbrowser
 from config import Config
 from audio_controller import AudioController
@@ -645,6 +646,41 @@ class AutoMuteGUI:
         for label, cmd in actions:
             ttk.Button(cmd_frame, text=label, command=cmd).pack(
                 fill=tk.X, pady=2)
+
+        # === Systemd User-Service Installation ===
+        systemd_frame = ttk.LabelFrame(right_frame, text="Systemd User-Service", padding="10")
+        systemd_frame.grid(row=right_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        right_row += 1
+
+        _service_name = "gateway-auto-mute.service"
+        _service_src = str(Path(__file__).parent / _service_name)
+        _systemd_dir = str(Path.home() / ".config" / "systemd" / "user")
+        _service_dst = str(Path(_systemd_dir) / _service_name)
+        _svc_info = (
+            f"Service-Datei (Quelle):\n  {_service_src}\n"
+            f"Installationsziel:\n  {_service_dst}\n"
+            "\n"
+            "Der Service l\u00e4uft als normaler Benutzer-Service\n"
+            "(kein root erforderlich)."
+        )
+        svc_info_text = tk.Text(systemd_frame, height=7, wrap=tk.WORD, relief=tk.FLAT,
+                                bg=self.root.cget('background'),
+                                font=('TkDefaultFont', 9), cursor="arrow")
+        svc_info_text.insert(tk.END, _svc_info)
+        svc_info_text.config(state=tk.DISABLED)
+        svc_info_text.pack(fill=tk.X, pady=(0, 6))
+
+        self._systemd_status_label = ttk.Label(systemd_frame, text="", foreground="gray")
+        self._systemd_status_label.pack(anchor=tk.W, pady=(0, 4))
+
+        btn_row = ttk.Frame(systemd_frame)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="Service installieren & aktivieren",
+                   command=self._install_systemd_service).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(btn_row, text="Service deaktivieren & entfernen",
+                   command=self._uninstall_systemd_service).pack(side=tk.LEFT)
+
+        self._update_systemd_status()
     
     def _copy_to_clipboard(self, text: str):
         """Kopiert Text in die Zwischenablage"""
@@ -705,7 +741,88 @@ class AutoMuteGUI:
             self._update_status("Daemon-Status: In-Process-Service läuft")
         else:
             self._update_status("Daemon-Status: gestoppt")
-    
+
+    # ── Systemd Installations-Helfer ────────────────────────────
+
+    def _systemd_service_path(self) -> Path:
+        return Path.home() / ".config" / "systemd" / "user" / "gateway-auto-mute.service"
+
+    def _update_systemd_status(self):
+        """Zeigt den aktuellen Installations-/Aktivierungsstatus des Systemd-Services an"""
+        dst = self._systemd_service_path()
+        if not hasattr(self, '_systemd_status_label'):
+            return
+        if not dst.exists():
+            self._systemd_status_label.config(
+                text="Status: nicht installiert", foreground="gray")
+            return
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "is-enabled", "gateway-auto-mute.service"],
+                capture_output=True, text=True, timeout=5)
+            enabled = result.stdout.strip()
+            result2 = subprocess.run(
+                ["systemctl", "--user", "is-active", "gateway-auto-mute.service"],
+                capture_output=True, text=True, timeout=5)
+            active = result2.stdout.strip()
+            self._systemd_status_label.config(
+                text=f"Status: installiert · {enabled} · {active}",
+                foreground="#1a73e8")
+        except Exception:
+            self._systemd_status_label.config(
+                text="Status: installiert (systemctl nicht verfügbar)", foreground="gray")
+
+    def _install_systemd_service(self):
+        """Kopiert die Service-Datei und aktiviert den Systemd User-Service"""
+        import shutil
+        src = Path(__file__).parent / "gateway-auto-mute.service"
+        dst = self._systemd_service_path()
+        if not src.exists():
+            messagebox.showerror("Fehler", f"Service-Datei nicht gefunden:\n{src}")
+            return
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, timeout=10)
+            subprocess.run(["systemctl", "--user", "enable", "gateway-auto-mute.service"],
+                           check=True, timeout=10)
+            messagebox.showinfo(
+                "Erfolg",
+                "Service wurde installiert und aktiviert.\n\n"
+                "Er startet nun automatisch beim Benutzer-Login.\n"
+                f"Installiert nach:\n{dst}")
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Fehler", f"systemctl-Befehl fehlgeschlagen:\n{e}")
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Installation fehlgeschlagen:\n{e}")
+        self._update_systemd_status()
+
+    def _uninstall_systemd_service(self):
+        """Deaktiviert und entfernt den Systemd User-Service"""
+        dst = self._systemd_service_path()
+        if not dst.exists():
+            messagebox.showinfo("Info", "Service ist nicht installiert.")
+            return
+        if not messagebox.askyesno(
+            "Service entfernen",
+            "Den Systemd User-Service deaktivieren und entfernen?\n\n"
+            f"Datei: {dst}"
+        ):
+            return
+        try:
+            subprocess.run(["systemctl", "--user", "stop", "gateway-auto-mute.service"],
+                           timeout=10)
+            subprocess.run(["systemctl", "--user", "disable", "gateway-auto-mute.service"],
+                           check=True, timeout=10)
+            dst.unlink()
+            subprocess.run(["systemctl", "--user", "daemon-reload"], check=True, timeout=10)
+            messagebox.showinfo("Erfolg", "Service wurde deaktiviert und entfernt.")
+        except subprocess.CalledProcessError as e:
+            messagebox.showerror("Fehler", f"systemctl-Befehl fehlgeschlagen:\n{e}")
+        except Exception as e:
+            messagebox.showerror("Fehler", f"Deinstallation fehlgeschlagen:\n{e}")
+        self._update_systemd_status()
+
     def _load_devices(self):
         """Lädt verfügbare Audio-Geräte"""
         self._update_status("Lade verfügbare Geräte...")
