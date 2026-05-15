@@ -37,26 +37,22 @@ class ConfigSlider(ttk.Frame):
         self._meter_level = 0.0
 
         # row 0: Label
-        ttk.Label(self, text=label).grid(row=0, column=0, columnspan=5, sticky=tk.W, pady=(5, 0))
+        ttk.Label(self, text=label).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(5, 0))
 
         # row 1: Level-Meter Canvas (optional) ODER direkt der Slider-Bereich
         if show_level_meter:
             self.meter_canvas = tk.Canvas(self, height=18, bg='#1e1e1e',
                                           highlightthickness=1, highlightbackground='#555')
-            self.meter_canvas.grid(row=1, column=0, columnspan=5, sticky=tk.EW, padx=0, pady=(2, 1))
+            self.meter_canvas.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=0, pady=(2, 1))
             self.meter_canvas.bind('<Configure>', lambda e: self._draw_meter())
             slider_row = 2
-            label_row = 3
         else:
             self.meter_canvas = None
             slider_row = 1
-            label_row = 2
 
-        # Min-Wert Anzeige (schreibgeschützt – nur via Konfigurationsdatei änderbar)
-        ttk.Label(self, text="Min:").grid(row=slider_row, column=0, padx=(0, 5))
+        # Interne Min/Max-Variablen (für Berechnungen, kein UI)
         self.min_var = tk.StringVar(value=str(config.get(min_key, 0)))
-        min_entry = ttk.Entry(self, textvariable=self.min_var, width=8, state='readonly')
-        min_entry.grid(row=slider_row, column=1, padx=(0, 10))
+        self.max_var = tk.StringVar(value=str(config.get(max_key, 100)))
 
         # Slider
         actual_val = config.get(config_key, 0)
@@ -81,23 +77,18 @@ class ConfigSlider(ttk.Frame):
             variable=slider_var,
             command=self._on_slider_changed
         )
-        self.slider.grid(row=slider_row, column=2, sticky=tk.EW, padx=5)
-        self.columnconfigure(2, weight=1)
+        self.slider.grid(row=slider_row, column=0, sticky=tk.EW, padx=(0, 5))
+        self.columnconfigure(0, weight=1)
 
-        # Max-Wert Anzeige (schreibgeschützt – nur via Konfigurationsdatei änderbar)
-        ttk.Label(self, text="Max:").grid(row=slider_row, column=3, padx=(10, 5))
-        self.max_var = tk.StringVar(value=str(config.get(max_key, 100)))
-        max_entry = ttk.Entry(self, textvariable=self.max_var, width=8, state='readonly')
-        max_entry.grid(row=slider_row, column=4)
-
-        # Aktueller Wert
-        self.current_label = ttk.Label(self, text=f"{actual_val:.1f} {unit}")
-        self.current_label.grid(row=label_row, column=0, columnspan=5, sticky=tk.W)
+        # Aktueller Wert – feste Breite rechts neben dem Schieberegler
+        self.current_label = ttk.Label(self, text=f"{actual_val:.1f} {unit}",
+                                       width=9, anchor=tk.E)
+        self.current_label.grid(row=slider_row, column=1, sticky=tk.E, padx=(0, 5))
 
         # Tick-Striche unter dem Schieberegler
         if show_ticks:
             self.tick_canvas = tk.Canvas(self, height=14, highlightthickness=0, bd=0)
-            self.tick_canvas.grid(row=label_row + 1, column=2, sticky=tk.EW, padx=5,
+            self.tick_canvas.grid(row=slider_row + 1, column=0, sticky=tk.EW, padx=(0, 5),
                                   pady=(0, 2))
             self.tick_canvas.bind('<Configure>', lambda e: self._draw_ticks())
         else:
@@ -588,10 +579,6 @@ class AutoMuteGUI:
             "\n"
             "Quellcode auf GitHub:\n"
             f"  {_github_url}\n"
-            "\n"
-            "Dieses Programm wäre ohne die Unterstützung von\n"
-            "Claude AI (Anthropic) nicht möglich gewesen.\n"
-            "Vielen Dank!"
         )
         info_text = tk.Text(info_frame, height=10, wrap=tk.WORD, relief=tk.FLAT,
                             bg=self.root.cget('background'),
