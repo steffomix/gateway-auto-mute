@@ -7,6 +7,7 @@ faulthandler.enable()  # Stacktrace bei SIGSEGV/SIGFPE ausgeben
 import tkinter as tk
 from tkinter import ttk, messagebox
 import pyperclip
+from datetime import datetime
 from pathlib import Path
 import queue
 import sys
@@ -294,6 +295,7 @@ class AutoMuteGUI:
         self._changes_made = False       # True sobald irgendeine Änderung gemacht wurde
 
         self._create_widgets()
+        self._update_status("Gateway Auto-Mute gestartet")
         self._load_devices()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_queue()
@@ -393,6 +395,12 @@ class AutoMuteGUI:
         """Aktualisiert die Statusanzeige (nur aus Hauptthread aufrufen)"""
         if not self._alive:
             return
+        # Zeitstempel hinzufügen, sofern die Nachricht noch keinen hat
+        # (Log-Datei-Einträge enthalten bereits einen Timestamp im Format [YYYY-MM-DD HH:MM:SS])
+        import re as _re
+        if not _re.match(r'\[\d{4}-\d{2}-\d{2}', message):
+            ts = datetime.now().strftime('%H:%M:%S')
+            message = f"[{ts}] {message}"
         try:
             self.status_text.config(state=tk.NORMAL)
             self.status_text.insert(tk.END, f"{message}\n")
@@ -882,16 +890,34 @@ class AutoMuteGUI:
         self.speaker_map = {f"{s['description']} ({s['name']})": s['name'] for s in speakers}
         self.mic_map = {f"{m['description']} ({m['name']})": m['name'] for m in microphones}
         
-        self._update_status(f"Gefunden: {len(speakers)} Lautsprecher, {len(microphones)} Mikrofone")
-        
-        # Gespeicherte Geräte in Combobox vorauswählen
+        self._update_status(f"Geräte geladen: {len(speakers)} Lautsprecher, {len(microphones)} Mikrofon(e)")
+
+        # Konfiguriertes Gerät mit Bezeichnung anzeigen
         saved_speaker = self.config.get("speaker_device", "")
+        saved_mic = self.config.get("microphone_device", "")
+        if saved_speaker:
+            desc = next((s['description'] for s in speakers if s['name'] == saved_speaker), None)
+            if desc:
+                self._update_status(f"Lautsprecher: {desc}")
+            else:
+                self._update_status(f"Lautsprecher: {saved_speaker} (nicht gefunden)")
+        else:
+            self._update_status("Lautsprecher: nicht konfiguriert")
+        if saved_mic:
+            desc = next((m['description'] for m in microphones if m['name'] == saved_mic), None)
+            if desc:
+                self._update_status(f"Mikrofon:     {desc}")
+            else:
+                self._update_status(f"Mikrofon:     {saved_mic} (nicht gefunden)")
+        else:
+            self._update_status("Mikrofon:     nicht konfiguriert")
+
+        # Gespeicherte Geräte in Combobox vorauswählen
         for display_name, internal_name in self.speaker_map.items():
             if internal_name == saved_speaker:
                 self.speaker_var.set(display_name)
                 break
         
-        saved_mic = self.config.get("microphone_device", "")
         for display_name, internal_name in self.mic_map.items():
             if internal_name == saved_mic:
                 self.mic_var.set(display_name)
@@ -1015,7 +1041,6 @@ class AutoMuteGUI:
 
     def run(self):
         """Startet die GUI"""
-        self._update_status("Gateway Auto-Mute gestartet")
         self.root.mainloop()
 
     def cleanup(self):
