@@ -377,7 +377,7 @@ class AudioController:
 
                 # Entscheidungslogik
                 if speaker_volume > volume_threshold:
-                    # Lautsprecher ist laut - Mikrofon dämpfen
+                    # Lautsprecher ist laut - Mikrofon dämpfen und Hold-Zeit neu starten
                     self.last_trigger_time = current_time
                     self._set_source_volume(microphone, mic_muted_level)
                     if self.current_state != "muted":
@@ -393,11 +393,22 @@ class AudioController:
                         if self.current_state != "muted":
                             self.current_state = "muted"
                     else:
-                        # Hold-Zeit vorbei - Mikrofon normalisieren
-                        self._set_source_volume(microphone, mic_normal_level)
-                        if self.current_state != "monitoring":
-                            self.current_state = "monitoring"
-                            self._update_status("Mikrofon normal - überwache...")
+                        # Hold-Zeit abgelaufen – Pegel nochmals prüfen bevor Mikrofon geöffnet wird
+                        check_volume = self._get_sink_audio_level(speaker)
+                        if check_volume > volume_threshold:
+                            # Pegel immer noch zu hoch: Hold-Zeit verlängern
+                            self.last_trigger_time = current_time
+                            self._set_source_volume(microphone, mic_muted_level)
+                            self._update_status(
+                                f"Hold-Zeit verlängert – Pegel noch {check_volume:.1f}% "
+                                f"(Schwelle: {volume_threshold}%)"
+                            )
+                        else:
+                            # Pegel sicher unter Schwelle: Mikrofon freigeben
+                            self._set_source_volume(microphone, mic_normal_level)
+                            if self.current_state != "monitoring":
+                                self.current_state = "monitoring"
+                                self._update_status("Mikrofon normal - überwache...")
                 
             except Exception as e:
                 self._update_status(f"Fehler in Überwachungsschleife: {e}")
