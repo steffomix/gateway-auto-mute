@@ -32,6 +32,8 @@ class AudioController:
         self._reader_thread: Optional[threading.Thread] = None
         self._current_monitor_source: str = ""
         self._current_peak: float = 0.0
+        self._last_data_time: float = 0.0   # Zeitpunkt des letzten gültigen Datenpakets
+        self._STREAM_TIMEOUT: float = 1.0   # Sekunden ohne Daten = Sicherheitsfall
         self._monitor_channels: int = 1  # Kanalzahl des aktiven parec-Streams
         self._MONITOR_RATE: int = 8000  # Hz, reicht für Pegelüberwachung
         self._level_only_mode: bool = False  # True wenn nur Level-Monitoring aktiv
@@ -204,6 +206,7 @@ class AudioController:
             )
             self._current_monitor_source = monitor_source_name
             self._current_peak = 0.0
+            self._last_data_time = time.time()  # Optimistisch initialisieren
             self._reader_thread = threading.Thread(
                 target=self._reader_loop, daemon=True
             )
@@ -246,6 +249,7 @@ class AudioController:
                         self._current_peak = max(abs(s) for s in samples)
                     if self.level_callback:
                         self.level_callback(min(100.0, self._current_peak * 100.0))
+                    self._last_data_time = time.time()
             except Exception:
                 break
 
@@ -255,6 +259,7 @@ class AudioController:
         self._monitor_process = None
         self._current_monitor_source = ""
         self._monitor_channels = 1
+        self._last_data_time = 0.0
         if proc:
             try:
                 proc.terminate()
@@ -273,6 +278,9 @@ class AudioController:
         """Gibt den zuletzt gemessenen Peak-Pegel des Sinks zurück (0–100 %).
         Startet den persistenten parec-Stream neu, falls sich die Monitor-Source
         geändert hat oder der Prozess nicht mehr läuft.
+        Sicherheitsschaltung: Wenn der Stream gestartet werden konnte, aber
+        keine Daten geliefert hat (Timeout), wird 100 % zurückgegeben damit
+        das Mikrofon auf jeden Fall gedämpft bleibt.
         """
         monitor_source = sink.monitor_source_name
         # Stream (neu-)starten wenn nötig
@@ -280,7 +288,20 @@ class AudioController:
                 or self._monitor_process is None
                 or self._monitor_process.poll() is not None):
             if not self._start_monitor_stream(monitor_source):
-                return 0.0
+                # Stream konnte nicht gestartet werden → Sicherheitsfall: muten
+                return 100.0
+
+        # Sicherheitsschaltung: Daten-Timeout prüfen
+        if self._last_data_time > 0:
+            age = time.time() - self._last_data_time
+            if age > self._STREAM_TIMEOUT:
+                if self.current_state != "muted":
+                    self._update_status(
+                        f"Sicherheitsschaltung: keine Daten vom Lautsprecher "
+                        f"seit {age:.1f}s – Mikrofon wird gedämpft"
+                    )
+                return 100.0
+
         peak_percent = min(100.0, self._current_peak * 100.0)
         return peak_percent
     
