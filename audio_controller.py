@@ -37,6 +37,7 @@ class AudioController:
         self._monitor_channels: int = 1  # Kanalzahl des aktiven parec-Streams
         self._MONITOR_RATE: int = 8000  # Hz, reicht für Pegelüberwachung
         self._level_only_mode: bool = False  # True wenn nur Level-Monitoring aktiv
+        self._fade_start_time: float = 0.0  # Zeitpunkt Beginn Einblendung (0 = inaktiv)
         self._last_routing_check: float = 0.0
         self._ROUTING_CHECK_INTERVAL: float = 2.0  # Sekunden zwischen Routing-Prüfungen
         
@@ -349,6 +350,7 @@ class AudioController:
                 mic_normal_level = self.config.get("mic_normal_level", 80)
                 mic_muted_level = self.config.get("mic_muted_level", 10)
                 hold_time = self.config.get("hold_time", 500) / 1000.0  # ms zu s
+                fade_in_time = self.config.get("fade_in_time", 1000) / 1000.0  # ms zu s
                 polling_interval = max(10, self.config.get("polling_interval", 50)) / 1000.0
 
                 # Routing periodisch prüfen und ggf. erzwingen
@@ -367,6 +369,7 @@ class AudioController:
                 if speaker_volume > volume_threshold:
                     # Lautsprecher ist laut - Mikrofon dämpfen und Hold-Zeit neu starten
                     self.last_trigger_time = current_time
+                    self._fade_start_time = 0.0
                     self._set_source_volume(microphone, mic_muted_level)
                     if self.current_state != "muted":
                         self.current_state = "muted"
@@ -377,6 +380,7 @@ class AudioController:
 
                     if time_since_trigger < hold_time:
                         # Noch in Hold-Zeit
+                        self._fade_start_time = 0.0
                         self._set_source_volume(microphone, mic_muted_level)
                         if self.current_state != "muted":
                             self.current_state = "muted"
@@ -386,17 +390,36 @@ class AudioController:
                         if check_volume > volume_threshold:
                             # Pegel immer noch zu hoch: Hold-Zeit verlängern
                             self.last_trigger_time = current_time
+                            self._fade_start_time = 0.0
                             self._set_source_volume(microphone, mic_muted_level)
                             self._update_status(
                                 f"Hold-Zeit verlängert – Pegel noch {check_volume:.1f}% "
                                 f"(Schwelle: {volume_threshold}%)"
                             )
                         else:
-                            # Pegel sicher unter Schwelle: Mikrofon freigeben
-                            self._set_source_volume(microphone, mic_normal_level)
-                            if self.current_state != "monitoring":
-                                self.current_state = "monitoring"
-                                self._update_status("Mikrofon normal - überwache...")
+                            # Pegel sicher unter Schwelle: Mikrofon einblenden
+                            if fade_in_time <= 0:
+                                self._set_source_volume(microphone, mic_normal_level)
+                                if self.current_state != "monitoring":
+                                    self.current_state = "monitoring"
+                                    self._update_status("Mikrofon normal - überwache...")
+                            else:
+                                if self._fade_start_time == 0.0:
+                                    self._fade_start_time = current_time
+                                    self._update_status(
+                                        f"Mikrofon blendet ein ({fade_in_time*1000:.0f} ms)..."
+                                    )
+                                elapsed = current_time - self._fade_start_time
+                                t = min(1.0, elapsed / fade_in_time)
+                                vol = mic_muted_level + (mic_normal_level - mic_muted_level) * t
+                                self._set_source_volume(microphone, vol)
+                                if t >= 1.0:
+                                    self._fade_start_time = 0.0
+                                    if self.current_state != "monitoring":
+                                        self.current_state = "monitoring"
+                                        self._update_status("Mikrofon normal - überwache...")
+                                else:
+                                    self.current_state = "fading"
                 
             except Exception as e:
                 self._update_status(f"Fehler in Überwachungsschleife: {e}")

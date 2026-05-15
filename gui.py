@@ -25,7 +25,7 @@ class ConfigSlider(ttk.Frame):
 
     def __init__(self, parent, label, config_key, config: Config,
                  min_key, max_key, unit="", on_change=None, show_level_meter=False,
-                 curved=False, show_ticks=False, **kwargs):
+                 curved=False, show_ticks=False, range_low_key=None, range_high_key=None, **kwargs):
         super().__init__(parent, **kwargs)
         self.config = config
         self.config_key = config_key
@@ -35,6 +35,8 @@ class ConfigSlider(ttk.Frame):
         self.unit = unit
         self.curved = curved
         self.show_ticks = show_ticks
+        self.range_low_key = range_low_key
+        self.range_high_key = range_high_key
         self._meter_level = 0.0
 
         # row 0: Label
@@ -130,6 +132,23 @@ class ConfigSlider(ttk.Frame):
 
         # Hintergrund
         self.meter_canvas.create_rectangle(0, 0, w, h, fill='#1e1e1e', outline='')
+
+        # Subtiler Hintergrund für den Bereich zwischen Mindest- und Normalpegel
+        if self.range_low_key and self.range_high_key:
+            try:
+                rlow = float(self.config.get(self.range_low_key, 0))
+                rhigh = float(self.config.get(self.range_high_key, 100))
+                if self.curved:
+                    rlow_x = max(0, min(w, self._val_to_pos(rlow, min_val, max_val) / 1000.0 * w))
+                    rhigh_x = max(0, min(w, self._val_to_pos(rhigh, min_val, max_val) / 1000.0 * w))
+                else:
+                    rlow_x = max(0, min(w, (rlow - min_val) / val_range * w))
+                    rhigh_x = max(0, min(w, (rhigh - min_val) / val_range * w))
+                if rhigh_x > rlow_x:
+                    self.meter_canvas.create_rectangle(
+                        rlow_x, 0, rhigh_x, h, fill='#2a2a22', outline='')
+            except Exception:
+                pass
 
         # Pegelbalken: grün wenn unter Schwellwert, rot wenn drüber
         if level_x > 0:
@@ -503,7 +522,8 @@ class AutoMuteGUI:
             "volume_threshold", self.config,
             "volume_threshold_min", "volume_threshold_max",
             unit="%", on_change=self._mark_dirty, show_level_meter=True,
-            curved=True, show_ticks=True
+            curved=True, show_ticks=True,
+            range_low_key="mic_muted_level", range_high_key="mic_normal_level"
         )
         self.volume_threshold_slider.pack(fill=tk.X, pady=5)
 
@@ -534,6 +554,15 @@ class AutoMuteGUI:
         time_frame.grid(row=left_row, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
         left_row += 1
 
+        self.polling_slider = ConfigSlider(
+            time_frame,
+            "Messintervall (wie oft wird die Lautstärke geprüft)",
+            "polling_interval", self.config,
+            "polling_interval_min", "polling_interval_max",
+            unit="ms", on_change=self._mark_dirty
+        )
+        self.polling_slider.pack(fill=tk.X, pady=5)
+
         self.hold_time_slider = ConfigSlider(
             time_frame,
             "Haltezeit (Mikrofon bleibt gedämpft)",
@@ -543,14 +572,14 @@ class AutoMuteGUI:
         )
         self.hold_time_slider.pack(fill=tk.X, pady=5)
 
-        self.polling_slider = ConfigSlider(
+        self.fade_in_slider = ConfigSlider(
             time_frame,
-            "Messintervall (wie oft wird die Lautstärke geprüft)",
-            "polling_interval", self.config,
-            "polling_interval_min", "polling_interval_max",
+            "Einblendzeit (Mikrofon blendet sich nach Haltezeit langsam ein)",
+            "fade_in_time", self.config,
+            "fade_in_time_min", "fade_in_time_max",
             unit="ms", on_change=self._mark_dirty
         )
-        self.polling_slider.pack(fill=tk.X, pady=5)
+        self.fade_in_slider.pack(fill=tk.X, pady=5)
 
         # === Geräteauswahl ===
         device_frame = ttk.LabelFrame(left_frame, text="Geräteauswahl", padding="10")

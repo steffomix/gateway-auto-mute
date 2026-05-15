@@ -37,6 +37,10 @@ class Config:
         "polling_interval_max": 3000,
         "polling_interval": 50,  # Intervall für Lautstärkemessung
 
+        "fade_in_time_min": 0,
+        "fade_in_time_max": 3000,
+        "fade_in_time": 1000,  # Einblendzeit Mikrofon nach Haltezeit (ms)
+
         # Routing-Wächter
         "routing_app_filter": "teamspeak",  # Anwendungsname dessen Streams auf konfigurierten Geräten gehalten werden
     }
