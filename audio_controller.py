@@ -32,6 +32,7 @@ class AudioController:
         self._reader_thread: Optional[threading.Thread] = None
         self._current_monitor_source: str = ""
         self._current_peak: float = 0.0
+        self._monitor_channels: int = 1  # Kanalzahl des aktiven parec-Streams
         self._MONITOR_RATE: int = 8000  # Hz, reicht für Pegelüberwachung
         self._level_only_mode: bool = False  # True wenn nur Level-Monitoring aktiv
         
@@ -84,15 +85,118 @@ class AudioController:
         
         return None
     
-    def _start_monitor_stream(self, monitor_source_name: str) -> bool:
-        """Startet einen persistenten parec-Subprocess für den Monitor-Stream."""
-        self._stop_monitor_stream()
+    def _get_source_channels(self, source_name: str) -> int:
+        """Gibt die Kanalzahl einer PipeWire/PulseAudio-Quelle zurück (Fallback: 2)."""
+        pulse = self._get_pulse_connection()
+        if not pulse:
+            return 2
         try:
+            for src in pulse.source_list():
+                if src.name == source_name:
+                    return max(1, src.channel_count)
+        except Exception:
+            pass
+        return 2
+
+    def _pw_list_ports(self, flag: str) -> list:
+        """Listet PipeWire-Ports via pw-link. flag: '-o' (Output) oder '-i' (Input).
+        Gibt 'node:port'-Strings zurück."""
+        try:
+            r = subprocess.run(['pw-link', flag],
+                               capture_output=True, text=True, timeout=5)
+            ports = []
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                if line and ':' in line:
+                    ports.append(line.split()[-1])
+            return ports
+        except Exception:
+            return []
+
+    def _pw_link_connect_worker(self, monitor_source_name: str,
+                                ports_before: set) -> None:
+        """Verbindet parec-Ports explizit mit dem Monitor via pw-link --passive.
+        Passive Links verschwinden automatisch wenn parec oder der Monitor-Port
+        nicht mehr existieren – es entstehen keine verbleibenden Verbindungen."""
+        time.sleep(0.5)
+        try:
+            # Neue Input-Ports = die von parec gerade erzeugten Capture-Ports
+            ports_after = set(self._pw_list_ports('-i'))
+            new_ports = sorted(ports_after - ports_before)
+            if not new_ports:
+                new_ports = sorted(p for p in self._pw_list_ports('-i')
+                                   if 'capture' in p.lower())
+
+            # pulsectl liefert "...stereo-output.monitor", pw-link kennt den Node
+            # als "...stereo-output" mit Ports :monitor_FL / :monitor_FR
+            node_name = (monitor_source_name[:-len('.monitor')]
+                         if monitor_source_name.endswith('.monitor')
+                         else monitor_source_name)
+            monitor_ports = sorted(
+                p for p in self._pw_list_ports('-o')
+                if p.startswith(node_name + ':monitor')
+            )
+
+            if not monitor_ports or not new_ports:
+                self._update_status(
+                    f"pw-link: Monitor-Ports={monitor_ports}, parec-Ports={new_ports}"
+                )
+                return
+
+            # Bestehende falsche Links zu den parec-Ports trennen
+            try:
+                links_r = subprocess.run(['pw-link', '-l'],
+                                         capture_output=True, text=True, timeout=5)
+                for line in links_r.stdout.splitlines():
+                    if ' -> ' not in line:
+                        continue
+                    src, dst = line.strip().split(' -> ', 1)
+                    src = src.strip().split()[-1]
+                    dst = dst.strip()
+                    if dst in new_ports and not src.startswith(node_name + ':monitor'):
+                        subprocess.run(['pw-link', '-d', src, dst],
+                                       capture_output=True, timeout=5)
+            except Exception:
+                pass
+
+            # Passiv verbinden: Link verschwindet automatisch wenn parec endet
+            for src, dst in zip(monitor_ports, new_ports):
+                res = subprocess.run(['pw-link', '--passive', src, dst],
+                                     capture_output=True, text=True, timeout=5)
+                if res.returncode == 0:
+                    self._update_status(f"pw-link (passiv): {src} → {dst}")
+                else:
+                    err = res.stderr.strip()
+                    if err and 'exist' not in err.lower():
+                        self._update_status(f"pw-link Fehler: {err}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            self._update_status(f"pw-link Verbindungsfehler: {e}")
+
+    def _start_monitor_stream(self, monitor_source_name: str) -> bool:
+        """Startet einen persistenten parec-Subprocess für den Monitor-Stream.
+        Parec wird ohne --device gestartet; die Verbindung zum richtigen Monitor
+        wird explizit per pw-link --passive hergestellt. Passive Links
+        verschwinden automatisch wenn parec stoppt."""
+        self._stop_monitor_stream()
+        channels = self._get_source_channels(monitor_source_name)
+        if channels == 1:
+            channel_map = 'mono'
+        elif channels == 2:
+            channel_map = 'front-left,front-right'
+        else:
+            channel_map = ','.join(['aux' + str(i) for i in range(channels)])
+
+        ports_before = set(self._pw_list_ports('-i'))
+
+        try:
+            self._monitor_channels = channels
             self._monitor_process = subprocess.Popen(
                 ['parec',
-                 f'--device={monitor_source_name}',
                  '--format=float32le',
-                 '--channels=1',
+                 f'--channels={channels}',
+                 f'--channel-map={channel_map}',
                  f'--rate={self._MONITOR_RATE}',
                  f'--latency-msec={max(100, ((int(self.config.get("polling_interval", 50)) + 99) // 100) * 100)}'],
                 stdout=subprocess.PIPE,
@@ -104,6 +208,11 @@ class AudioController:
                 target=self._reader_loop, daemon=True
             )
             self._reader_thread.start()
+            threading.Thread(
+                target=self._pw_link_connect_worker,
+                args=(monitor_source_name, ports_before),
+                daemon=True
+            ).start()
             return True
         except Exception as e:
             self._update_status(f"Fehler beim Starten des Monitor-Streams: {e}")
@@ -113,8 +222,9 @@ class AudioController:
     def _reader_loop(self) -> None:
         """Liest kontinuierlich Audio-Daten aus parec, aktualisiert self._current_peak
         und ruft level_callback direkt auf – unabhängig vom Monitoring-Loop."""
-        # 50 ms Chunks: rate * 0.05 s * 4 Bytes (float32)
-        chunk_bytes = int(self._MONITOR_RATE * 0.05) * 4
+        channels = self._monitor_channels
+        # 50 ms Chunks: rate * 0.05 s * channels * 4 Bytes (float32)
+        chunk_bytes = int(self._MONITOR_RATE * 0.05) * channels * 4
         proc = self._monitor_process
         while self.running and proc and proc.poll() is None:
             try:
@@ -124,7 +234,16 @@ class AudioController:
                 n = len(data) // 4
                 if n > 0:
                     samples = struct.unpack(f'{n}f', data[:n * 4])
-                    self._current_peak = max(abs(s) for s in samples)
+                    if channels > 1:
+                        frames = n // channels
+                        peak = 0.0
+                        for i in range(frames):
+                            fp = max(abs(samples[i * channels + c]) for c in range(channels))
+                            if fp > peak:
+                                peak = fp
+                        self._current_peak = peak
+                    else:
+                        self._current_peak = max(abs(s) for s in samples)
                     if self.level_callback:
                         self.level_callback(min(100.0, self._current_peak * 100.0))
             except Exception:
@@ -135,6 +254,7 @@ class AudioController:
         proc = self._monitor_process
         self._monitor_process = None
         self._current_monitor_source = ""
+        self._monitor_channels = 1
         if proc:
             try:
                 proc.terminate()

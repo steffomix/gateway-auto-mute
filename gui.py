@@ -980,15 +980,11 @@ class AutoMuteGUI:
             # Daemon wurde gestoppt
             self._external_service = False
             self._update_status("Externer Service gestoppt")
-            self.audio_controller.stop_level_monitoring()
             if not self.audio_controller.is_running():
                 self.start_button.config(state=tk.NORMAL)
                 self.stop_button.config(state=tk.DISABLED)
 
         if self._external_service:
-            # Sicherstellen dass Level-Monitoring aktiv ist (startet oder stellt nach Absturz wieder her)
-            if not self.audio_controller.is_level_monitoring():
-                self.audio_controller.start_level_monitoring_only()
             self._tail_log_file()
 
         # Systemd-Status regelmäßig aktualisieren
@@ -1024,8 +1020,6 @@ class AutoMuteGUI:
 
     def cleanup(self):
         """Räumt beim Beenden auf"""
-        if self.audio_controller.is_level_monitoring():
-            self.audio_controller.stop_level_monitoring()
         if self.audio_controller.is_running():
             self.audio_controller.stop()
 
