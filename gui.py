@@ -989,6 +989,9 @@ class AutoMuteGUI:
             self._update_status(f"Externer Service erkannt (PID: {pid}) – verbinde...")
             self.start_button.config(state=tk.DISABLED)
             self.stop_button.config(state=tk.NORMAL)
+            # Pegelanzeige für die GUI starten (unabhängig vom Daemon-Prozess)
+            if not self.audio_controller.is_running():
+                self.audio_controller.start_level_monitoring_only()
             # Letzte Log-Zeilen als Kontext anzeigen, dann ab dort weiter lesen
             log_file = Path.home() / ".config" / "gateway-auto-mute" / "service.log"
             if log_file.exists():
@@ -1006,6 +1009,8 @@ class AutoMuteGUI:
             # Daemon wurde gestoppt
             self._external_service = False
             self._update_status("Externer Service gestoppt")
+            if self.audio_controller.is_level_monitoring():
+                self.audio_controller.stop_level_monitoring()
             if not self.audio_controller.is_running():
                 self.start_button.config(state=tk.NORMAL)
                 self.stop_button.config(state=tk.DISABLED)
@@ -1047,6 +1052,8 @@ class AutoMuteGUI:
         """Räumt beim Beenden auf"""
         if self.audio_controller.is_running():
             self.audio_controller.stop()
+        elif self.audio_controller.is_level_monitoring():
+            self.audio_controller.stop_level_monitoring()
 
 
 def main():

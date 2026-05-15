@@ -217,6 +217,13 @@ class AudioController:
                 if app_filter in app and si.sink != speaker.index:
                     try:
                         pulse.sink_input_move(si.index, speaker.index)
+                        # WirePlumber-Präferenz setzen: Stream dauerhaft auf diesem Gerät halten
+                        node_id = si.proplist.get('object.id') or si.proplist.get('node.id', '')
+                        if node_id:
+                            subprocess.run(
+                                ['pw-metadata', str(node_id), 'target.object', speaker.name],
+                                capture_output=True, timeout=3
+                            )
                         self._update_status(
                             f"Routing: '{si.proplist.get('application.name', app)}' "
                             f"Ausgabe → '{speaker.description}'"
@@ -233,6 +240,13 @@ class AudioController:
                 if app_filter in app and so.source != microphone.index:
                     try:
                         pulse.source_output_move(so.index, microphone.index)
+                        # WirePlumber-Präferenz setzen: Stream dauerhaft auf diesem Gerät halten
+                        node_id = so.proplist.get('object.id') or so.proplist.get('node.id', '')
+                        if node_id:
+                            subprocess.run(
+                                ['pw-metadata', str(node_id), 'target.object', microphone.name],
+                                capture_output=True, timeout=3
+                            )
                         self._update_status(
                             f"Routing: '{so.proplist.get('application.name', app)}' "
                             f"Mikrofon → '{microphone.description}'"
