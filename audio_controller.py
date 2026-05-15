@@ -37,6 +37,8 @@ class AudioController:
         self._monitor_channels: int = 1  # Kanalzahl des aktiven parec-Streams
         self._MONITOR_RATE: int = 8000  # Hz, reicht für Pegelüberwachung
         self._level_only_mode: bool = False  # True wenn nur Level-Monitoring aktiv
+        self._last_routing_check: float = 0.0
+        self._ROUTING_CHECK_INTERVAL: float = 2.0  # Sekunden zwischen Routing-Prüfungen
         
     def _update_status(self, message: str) -> None:
         """Sendet Statusmeldung an Callback"""
@@ -100,87 +102,10 @@ class AudioController:
             pass
         return 2
 
-    def _pw_list_ports(self, flag: str) -> list:
-        """Listet PipeWire-Ports via pw-link. flag: '-o' (Output) oder '-i' (Input).
-        Gibt 'node:port'-Strings zurück."""
-        try:
-            r = subprocess.run(['pw-link', flag],
-                               capture_output=True, text=True, timeout=5)
-            ports = []
-            for line in r.stdout.splitlines():
-                line = line.strip()
-                if line and ':' in line:
-                    ports.append(line.split()[-1])
-            return ports
-        except Exception:
-            return []
-
-    def _pw_link_connect_worker(self, monitor_source_name: str,
-                                ports_before: set) -> None:
-        """Verbindet parec-Ports explizit mit dem Monitor via pw-link --passive.
-        Passive Links verschwinden automatisch wenn parec oder der Monitor-Port
-        nicht mehr existieren – es entstehen keine verbleibenden Verbindungen."""
-        time.sleep(0.5)
-        try:
-            # Neue Input-Ports = die von parec gerade erzeugten Capture-Ports
-            ports_after = set(self._pw_list_ports('-i'))
-            new_ports = sorted(ports_after - ports_before)
-            if not new_ports:
-                new_ports = sorted(p for p in self._pw_list_ports('-i')
-                                   if 'capture' in p.lower())
-
-            # pulsectl liefert "...stereo-output.monitor", pw-link kennt den Node
-            # als "...stereo-output" mit Ports :monitor_FL / :monitor_FR
-            node_name = (monitor_source_name[:-len('.monitor')]
-                         if monitor_source_name.endswith('.monitor')
-                         else monitor_source_name)
-            monitor_ports = sorted(
-                p for p in self._pw_list_ports('-o')
-                if p.startswith(node_name + ':monitor')
-            )
-
-            if not monitor_ports or not new_ports:
-                self._update_status(
-                    f"pw-link: Monitor-Ports={monitor_ports}, parec-Ports={new_ports}"
-                )
-                return
-
-            # Bestehende falsche Links zu den parec-Ports trennen
-            try:
-                links_r = subprocess.run(['pw-link', '-l'],
-                                         capture_output=True, text=True, timeout=5)
-                for line in links_r.stdout.splitlines():
-                    if ' -> ' not in line:
-                        continue
-                    src, dst = line.strip().split(' -> ', 1)
-                    src = src.strip().split()[-1]
-                    dst = dst.strip()
-                    if dst in new_ports and not src.startswith(node_name + ':monitor'):
-                        subprocess.run(['pw-link', '-d', src, dst],
-                                       capture_output=True, timeout=5)
-            except Exception:
-                pass
-
-            # Passiv verbinden: Link verschwindet automatisch wenn parec endet
-            for src, dst in zip(monitor_ports, new_ports):
-                res = subprocess.run(['pw-link', '--passive', src, dst],
-                                     capture_output=True, text=True, timeout=5)
-                if res.returncode == 0:
-                    self._update_status(f"pw-link (passiv): {src} → {dst}")
-                else:
-                    err = res.stderr.strip()
-                    if err and 'exist' not in err.lower():
-                        self._update_status(f"pw-link Fehler: {err}")
-        except FileNotFoundError:
-            pass
-        except Exception as e:
-            self._update_status(f"pw-link Verbindungsfehler: {e}")
-
     def _start_monitor_stream(self, monitor_source_name: str) -> bool:
         """Startet einen persistenten parec-Subprocess für den Monitor-Stream.
-        Parec wird ohne --device gestartet; die Verbindung zum richtigen Monitor
-        wird explizit per pw-link --passive hergestellt. Passive Links
-        verschwinden automatisch wenn parec stoppt."""
+        parec wird mit --device=<monitor_source_name> gestartet, damit PipeWire
+        die Verbindung auch nach einem Cinnamon-Gerätewechsel nicht umleitet."""
         self._stop_monitor_stream()
         channels = self._get_source_channels(monitor_source_name)
         if channels == 1:
@@ -190,12 +115,11 @@ class AudioController:
         else:
             channel_map = ','.join(['aux' + str(i) for i in range(channels)])
 
-        ports_before = set(self._pw_list_ports('-i'))
-
         try:
             self._monitor_channels = channels
             self._monitor_process = subprocess.Popen(
                 ['parec',
+                 f'--device={monitor_source_name}',
                  '--format=float32le',
                  f'--channels={channels}',
                  f'--channel-map={channel_map}',
@@ -206,16 +130,11 @@ class AudioController:
             )
             self._current_monitor_source = monitor_source_name
             self._current_peak = 0.0
-            self._last_data_time = time.time()  # Optimistisch initialisieren
+            self._last_data_time = time.time()
             self._reader_thread = threading.Thread(
                 target=self._reader_loop, daemon=True
             )
             self._reader_thread.start()
-            threading.Thread(
-                target=self._pw_link_connect_worker,
-                args=(monitor_source_name, ports_before),
-                daemon=True
-            ).start()
             return True
         except Exception as e:
             self._update_status(f"Fehler beim Starten des Monitor-Streams: {e}")
@@ -273,6 +192,55 @@ class AudioController:
             self._reader_thread.join(timeout=2)
             self._reader_thread = None
         self._current_peak = 0.0
+
+    def _enforce_routing(self, speaker: pulsectl.PulseSinkInfo,
+                         microphone: pulsectl.PulseSourceInfo) -> None:
+        """Stellt sicher, dass alle Streams der konfigurierten Anwendung
+        (routing_app_filter) auf den richtigen Geräten bleiben.
+        Wird aufgerufen wenn WirePlumber Streams nach einem Cinnamon-
+        Gerätewechsel auf das neue Standard-Gerät umgeleitet hat.
+
+        Prüft:
+          • Sink-Inputs  (Ausgabe → speaker)   via pulse.sink_input_move()
+          • Source-Outputs (Mikrofon → microphone) via pulse.source_output_move()
+        """
+        pulse = self._get_pulse_connection()
+        if not pulse:
+            return
+
+        app_filter = self.config.get("routing_app_filter", "teamspeak").lower()
+
+        try:
+            for si in pulse.sink_input_list():
+                app = (si.proplist.get('application.name', '')
+                       or si.proplist.get('application.process.binary', '')).lower()
+                if app_filter in app and si.sink != speaker.index:
+                    try:
+                        pulse.sink_input_move(si.index, speaker.index)
+                        self._update_status(
+                            f"Routing: '{si.proplist.get('application.name', app)}' "
+                            f"Ausgabe → '{speaker.description}'"
+                        )
+                    except Exception as e:
+                        self._update_status(f"Routing sink-input Fehler: {e}")
+        except Exception as e:
+            self._update_status(f"Routing: Fehler beim Prüfen der Ausgabe-Streams: {e}")
+
+        try:
+            for so in pulse.source_output_list():
+                app = (so.proplist.get('application.name', '')
+                       or so.proplist.get('application.process.binary', '')).lower()
+                if app_filter in app and so.source != microphone.index:
+                    try:
+                        pulse.source_output_move(so.index, microphone.index)
+                        self._update_status(
+                            f"Routing: '{so.proplist.get('application.name', app)}' "
+                            f"Mikrofon → '{microphone.description}'"
+                        )
+                    except Exception as e:
+                        self._update_status(f"Routing source-output Fehler: {e}")
+        except Exception as e:
+            self._update_status(f"Routing: Fehler beim Prüfen der Mikrofon-Streams: {e}")
 
     def _get_sink_audio_level(self, sink: pulsectl.PulseSinkInfo) -> float:
         """Gibt den zuletzt gemessenen Peak-Pegel des Sinks zurück (0–100 %).
@@ -368,7 +336,13 @@ class AudioController:
                 mic_muted_level = self.config.get("mic_muted_level", 10)
                 hold_time = self.config.get("hold_time", 500) / 1000.0  # ms zu s
                 polling_interval = max(10, self.config.get("polling_interval", 50)) / 1000.0
-                
+
+                # Routing periodisch prüfen und ggf. erzwingen
+                now = time.time()
+                if now - self._last_routing_check >= self._ROUTING_CHECK_INTERVAL:
+                    self._last_routing_check = now
+                    self._enforce_routing(speaker, microphone)
+
                 # Aktuellen Peak-Pegel aus dem persistenten Monitor-Stream lesen
                 speaker_volume = self._get_sink_audio_level(speaker)
 

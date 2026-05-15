@@ -36,6 +36,9 @@ class Config:
         "polling_interval_min": 100,
         "polling_interval_max": 3000,
         "polling_interval": 50,  # Intervall für Lautstärkemessung
+
+        # Routing-Wächter
+        "routing_app_filter": "teamspeak",  # Anwendungsname dessen Streams auf konfigurierten Geräten gehalten werden
     }
     
     def __init__(self, config_file: str = None):
