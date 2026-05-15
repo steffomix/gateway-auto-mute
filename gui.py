@@ -44,7 +44,7 @@ class ConfigSlider(ttk.Frame):
 
         # row 1: Level-Meter Canvas (optional) ODER direkt der Slider-Bereich
         if show_level_meter:
-            self.meter_canvas = tk.Canvas(self, height=18, bg='#1e1e1e',
+            self.meter_canvas = tk.Canvas(self, height=18, bg='#222',
                                           highlightthickness=1, highlightbackground='#555')
             self.meter_canvas.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=0, pady=(2, 1))
             self.meter_canvas.bind('<Configure>', lambda e: self._draw_meter())
@@ -176,7 +176,11 @@ class ConfigSlider(ttk.Frame):
             self.value_var.set(actual)
         else:
             actual = float(value)
-        self.current_label.config(text=f"{actual:.1f} {self.unit}")
+        if self.unit == "ms":
+            actual = round(actual)
+            self.current_label.config(text=f"{actual} {self.unit}")
+        else:
+            self.current_label.config(text=f"{actual:.1f} {self.unit}")
         self.config.set(self.config_key, actual)
         if self.on_change:
             self.on_change()

@@ -349,9 +349,9 @@ class AudioController:
                 volume_threshold = self.config.get("volume_threshold", 10)
                 mic_normal_level = self.config.get("mic_normal_level", 80)
                 mic_muted_level = self.config.get("mic_muted_level", 10)
-                hold_time = self.config.get("hold_time", 500) / 1000.0  # ms zu s
-                fade_in_time = self.config.get("fade_in_time", 1000) / 1000.0  # ms zu s
-                polling_interval = max(10, self.config.get("polling_interval", 50)) / 1000.0
+                hold_time = round(self.config.get("hold_time", 500)) / 1000.0  # ms zu s
+                fade_in_time = round(self.config.get("fade_in_time", 1000)) / 1000.0  # ms zu s
+                polling_interval = max(10, round(self.config.get("polling_interval", 50))) / 1000.0
 
                 # Routing periodisch prüfen und ggf. erzwingen
                 now = time.time()
@@ -414,7 +414,9 @@ class AudioController:
                                 vol = mic_muted_level + (mic_normal_level - mic_muted_level) * t
                                 self._set_source_volume(microphone, vol)
                                 if t >= 1.0:
-                                    self._fade_start_time = 0.0
+                                    # Fade abgeschlossen – _fade_start_time bleibt gesetzt,
+                                    # damit beim nächsten Loop-Durchlauf nicht neu gestartet wird.
+                                    # Zurücksetzen erfolgt erst wenn Lautsprecher wieder auslöst.
                                     if self.current_state != "monitoring":
                                         self.current_state = "monitoring"
                                         self._update_status("Mikrofon normal - überwache...")
