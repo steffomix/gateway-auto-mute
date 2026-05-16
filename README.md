@@ -70,7 +70,7 @@ Dieser Aufbau geht einen anderen Weg: **Die vorhandene Heimstation wird zum Gate
 
 ## Gateway-Schema
 
-Das folgende Diagramm zeigt das Hardwaresetup, für das Gateway Auto-Mute entwickelt wurde — eine kombinierte CB-Gateway- und Heimstation, verbunden mit dem Teamspeak-3-Server von [freiesfunknetz.com](https://voice.freiesfunknetz.com):
+Das folgende Diagramm zeigt das Hardwaresetup, für das Gateway Auto-Mute entwickelt wurde — eine kombinierte CB-Gateway- und Heimstation, verbunden mit dem Teamspeak-3-Server von [freiesfunknetz.com](https://www.freiesfunknetz.com):
 
 ![CB Gateway + Homestation combined — Schematischer Aufbau](images/gateway-auto-mute-schema.png)
 
@@ -447,4 +447,4 @@ Dieses Programm wurde zu **100 % von [Claude AI](https://claude.ai) (Anthropic)*
 
 ---
 
-*Entwickelt für das CB-Funk-Gateway SHG@JO42OH, Kanal 80 — Teamspeak 3 via [voice.freiesfunknetz.com](https://voice.freiesfunknetz.com)*
+*Entwickelt für das CB-Funk-Gateway SHG@JO42OH, Kanal 80 — Teamspeak 3 via [voice.freiesfunknetz.com](https://www.freiesfunknetz.com)*
