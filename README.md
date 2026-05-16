@@ -37,6 +37,12 @@ Bei einem CB-Funk-Gateway läuft auf einem Computer (z. B. Laptop oder Raspberry
 
 **Die Lösung:** Gateway Auto-Mute überwacht den Lautsprecher-Pegel in Echtzeit via PulseAudio. Sobald Audio aus Teamspeak erkannt wird, wird die Mikrofon-Empfindlichkeit automatisch auf einen konfigurierten Dämpfungspegel reduziert — solange, bis das Lautsprecher-Audio vollständig abgeklungen ist. So ist sichergestellt, dass niemals gleichzeitig etwas in Teamspeak hinein- und herausgeht.
 
+### Warum dieser Aufbau?
+
+Ein eigenständiges CB-Gateway erfordert normalerweise eine vollständige, dedizierte Funkanlage mit eigener Antenne — häufig eine großzügig dimensionierte Außenantenne. Das ist aus Platzgründen in vielen Situationen schlicht nicht realisierbar.
+
+Dieser Aufbau geht einen anderen Weg: **Die vorhandene Heimstation wird zum Gateway erweitert.** Zusätzlich benötigt wird lediglich ein kleines, günstiges Handfunkgerät sowie die Verkabelung über die Audiomixer. Die Heimstation übernimmt dabei weiterhin den HF-Teil (Antenne, Senden, Empfangen), während das Handfunkgerät als steuerbarer Sendepfad für das TS3-Audio dient. Gateway Auto-Mute sorgt dafür, dass beide Pfade sauber voneinander getrennt bleiben.
+
 ---
 
 ## Funktionsweise
