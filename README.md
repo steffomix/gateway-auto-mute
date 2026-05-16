@@ -9,6 +9,7 @@
 - [Hintergrund und Motivation](#hintergrund-und-motivation)
 - [Funktionsweise](#funktionsweise)
 - [Gateway-Schema](#gateway-schema)
+- [Programmoberfläche](#programmoberfläche)
 - [Funktionsumfang](#funktionsumfang)
 - [Systemanforderungen](#systemanforderungen)
 - [Installation](#installation)
@@ -18,16 +19,23 @@
 - [Projektstruktur](#projektstruktur)
 - [Fehlerbehebung](#fehlerbehebung)
 - [Lizenz](#lizenz)
+- [Entwicklung](#entwicklung)
 
 ---
 
 ## Hintergrund und Motivation
 
-Bei einem CB-Funk-Gateway läuft auf einem Computer (z. B. Laptop oder Raspberry Pi) ein Teamspeak-3-Client, der als Brücke zwischen dem lokalen CB-Funkgerät und einem TS3-Server fungiert. Empfangene CB-Signale werden über den Mikrofon-Eingang an TS3 übertragen, und TS3-Audio wird über den Lautsprecher-Ausgang an das Funkgerät weitergeleitet.
+In einem gemeinsam genutzten Teamspeak-3-Kanal sind zahlreiche CB-Funk-Gateways, externe Weiterleitungsserver und Benutzer aus verschiedenen Regionen zusammengeschlossen. Gateway-Betreiber sind dabei äußerst sensibel was Störungen betrifft — sie wünschen eine ruhige, disziplinierte Konversation ohne Echos, Rückkopplungen oder ungewollte Übertragungen.
 
-**Das Problem:** Wenn TS3-Audio aus dem Lautsprecher erklingt, kann dieser Ton vom Mikrofon-Eingang aufgenommen werden — es entsteht eine Rückkopplung bzw. ein Echo, das auf den Teamspeak-Kanal zurückübertragen wird.
+Das oberste Gebot in einem solchen Verbund lautet daher:
 
-**Die Lösung:** Gateway Auto-Mute überwacht den Lautsprecher-Pegel in Echtzeit via PulseAudio. Sobald Audio erkannt wird, wird die Mikrofon-Empfindlichkeit automatisch auf einen konfigurierten Dämpfungspegel reduziert, bis das Lautsprecher-Audio abgeklungen ist. So wird das Echo zuverlässig unterdrückt.
+> **Nur wenn nichts aus Teamspeak herausgeht, darf etwas in Teamspeak hineingehen.**
+
+Bei einem CB-Funk-Gateway läuft auf einem Computer (z. B. Laptop oder Raspberry Pi) ein Teamspeak-3-Client, der als Brücke zwischen dem lokalen CB-Funkgerät und dem TS3-Server fungiert. Empfangene CB-Signale werden über den Mikrofon-Eingang an TS3 übertragen, und TS3-Audio wird über den Lautsprecher-Ausgang an das Funkgerät weitergeleitet.
+
+**Das Problem:** Wenn TS3-Audio aus dem Lautsprecher erklingt, kann dieser Ton vom Mikrofon-Eingang aufgenommen werden — es entsteht eine Rückkopplung bzw. ein Echo, das auf den Teamspeak-Kanal zurückübertragen wird. Im schlimmsten Fall löst dies eine Sendekette aus, die alle verbundenen Gateways stört.
+
+**Die Lösung:** Gateway Auto-Mute überwacht den Lautsprecher-Pegel in Echtzeit via PulseAudio. Sobald Audio aus Teamspeak erkannt wird, wird die Mikrofon-Empfindlichkeit automatisch auf einen konfigurierten Dämpfungspegel reduziert — solange, bis das Lautsprecher-Audio vollständig abgeklungen ist. So ist sichergestellt, dass niemals gleichzeitig etwas in Teamspeak hinein- und herausgeht.
 
 ---
 
@@ -56,23 +64,39 @@ Bei einem CB-Funk-Gateway läuft auf einem Computer (z. B. Laptop oder Raspberry
 
 ## Gateway-Schema
 
-Das folgende Diagramm zeigt das typische Hardwaresetup, für das Gateway Auto-Mute entwickelt wurde — ein CB-Funk-Gateway auf Kanal 80, verbunden mit dem Teamspeak-3-Server von [freiesfunknetz.com](https://voice.freiesfunknetz.com):
+Das folgende Diagramm zeigt das Hardwaresetup, für das Gateway Auto-Mute entwickelt wurde — eine kombinierte CB-Gateway- und Heimstation, verbunden mit dem Teamspeak-3-Server von [freiesfunknetz.com](https://voice.freiesfunknetz.com):
 
-![CB Gateway Schema — SHG@JO42OH Kanal 80](images/cb%20gateway%20schema%203.png)
+![CB Gateway + Homestation combined — Schematischer Aufbau](images/gateway-auto-mute-schema.png)
 
 ### Signalfluss im Detail
 
 | Verbindung | Beschreibung |
 |---|---|
-| **Antenne Gateway → Albrecht 2990 AFS (RX)** | CB-Empfang vom Gateway-Standort |
-| **Albrecht 2990 AFS (SPK) → JBL Extreme 3** | Empfangenes CB-Signal wird abgehört (TX-Monitor) |
-| **Albrecht 2990 AFS (SPK) → Ext. Soundkarte (IN)** | CB-Audio geht als Mikrofon-Eingang in den TS3-Client |
-| **Ext. Soundkarte (OUT) → President George II (MIC)** | TS3-Audio steuert die Heimstation als Sender |
-| **President George II (SPK) → Ext. Soundkarte (IN)** | Rückkopplungspfad — hier greift Gateway Auto-Mute ein |
-| **TS3 Gateway (Laptop/Raspberry Pi)** | Läuft Teamspeak 3 + Gateway Auto-Mute |
-| **Antenne Heimstation** | Sendet das TS3-Audio auf die CB-Frequenz aus |
+| **Antenne ↔ HF-Pfad** | CB-Empfang und -Sendung über die gemeinsame Antenne |
+| **Beringer HA400 (Kopfhörerverstärker)** | Verteilt das eingehende CB-Audio auf mehrere Abnahmepunkte |
+| **Main CB Station — Mono Line IN** | CB-Audio aus dem HA400 geht als Eingang in die Hauptstation |
+| **Main CB Station — Mono Line OUT** | Sendepfad der Hauptstation zurück in den HF-Kreis |
+| **In House CB Loopback — Mono Line OUT** | Lokale Abhörschleife (Monitoring vor Ort) |
+| **Main Speaker — Stereo Line IN** | Lautsprecher-Wiedergabe des empfangenen CB-Signals |
+| **Teamspeak CB Gateway — USB Mono Line IN** | CB-Audio geht als Mikrofon-Eingang in den TS3-Client |
+| **Teamspeak CB Gateway — USB Stereo Line OUT** | TS3-Audio wird zur Heimstation weitergeleitet (Sendepfad) |
+| **Beringer MX400 (Audiomixer)** | Mischt die Signale für die verschiedenen Ausgabeziele |
+| **Gateway Auto-Mute (Software)** | Überwacht den USB Stereo Line OUT und dämpft den USB Mono Line IN automatisch |
 
-> **Gateway Auto-Mute** überwacht den Lautsprecher-Ausgang der externen USB-Soundkarte und dämpft automatisch den Mikrofon-Eingang, wenn TS3-Audio erkannt wird — bevor es zur Rückkopplung kommen kann.
+> **Gateway Auto-Mute** (lila Pfeil im Diagramm) überwacht softwareseitig den Lautsprecher-Ausgang der USB-Soundkarte und sperrt automatisch den Mikrofon-Eingang, solange TS3-Audio erkannt wird — bevor es zur Rückkopplung oder Störung der anderen Gateways im Verbund kommen kann.
+
+---
+
+## Programmoberfläche
+
+![Gateway Auto-Mute — Screenshot der Benutzeroberfläche](images/gateway-auto-mute-screenshot.png)
+
+Die GUI ist in vier Bereiche aufgeteilt:
+
+- **Links oben — In-Process Controller:** Startet und stoppt den Audio-Controller direkt in der GUI (z. B. zum Testen) und speichert die Konfiguration.
+- **Links Mitte — Pegel und Schwellwerte / Zeiteinstellungen / Geräteauswahl:** Alle einstellbaren Parameter auf einen Blick.
+- **Rechts oben — Status:** Live-Log des Audio-Controllers mit Zeitstempeln.
+- **Rechts unten — Hintergrund-Service (Daemon) / Systemd User-Service:** Steuert den dauerhaft laufenden Dienst und zeigt dessen Installationsstatus.
 
 ---
 
@@ -337,7 +361,8 @@ gateway-auto-mute/
 ├── gateway-auto-mute.service  # systemd User-Service-Unit
 ├── requirements.txt           # Python-Abhängigkeiten
 ├── images/
-│   └── cb gateway schema 3.png  # Gateway-Hardwareschema
+│   ├── gateway-auto-mute-schema.png      # Schematischer Hardwareaufbau
+│   └── gateway-auto-mute-screenshot.png  # Screenshot der Benutzeroberfläche
 ├── LICENSE
 └── README.md
 ```
@@ -405,6 +430,12 @@ systemctl --user start pulseaudio
 ## Lizenz
 
 Siehe [LICENSE](LICENSE) für Details.
+
+---
+
+## Entwicklung
+
+Dieses Programm wurde zu **100 % von [Claude AI](https://claude.ai) (Anthropic)** geschrieben — vom ersten Konzept bis zur fertigen Implementierung. Der Mensch hinter dem Projekt hat die Anforderungen formuliert, das Ergebnis getestet und die Hardware aufgebaut; den gesamten Quellcode hat Claude AI erzeugt.
 
 ---
 
