@@ -83,6 +83,8 @@ Das folgende Diagramm zeigt das Hardwaresetup, für das Gateway Auto-Mute entwic
 | **Beringer MX400 (Audiomixer)** | Mischt die Signale für die verschiedenen Ausgabeziele |
 | **Gateway Auto-Mute (Software)** | Überwacht den USB Stereo Line OUT und dämpft den USB Mono Line IN automatisch |
 
+> **Hinweis:** Die im Diagramm verwendeten Beringer-Geräte (HA400, MX400) sind lediglich preiswerte Beispielgeräte. Jedes andere Gerät mit ähnlicher Funktion — egal ob Kaufgerät eines anderen Herstellers oder Eigenbau — ist genauso geeignet. Entscheidend ist nur der Signalfluss, nicht das konkrete Modell.
+
 > **Gateway Auto-Mute** (lila Pfeil im Diagramm) überwacht softwareseitig den Lautsprecher-Ausgang der USB-Soundkarte und sperrt automatisch den Mikrofon-Eingang, solange TS3-Audio erkannt wird — bevor es zur Rückkopplung oder Störung der anderen Gateways im Verbund kommen kann.
 
 ---
