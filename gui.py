@@ -44,7 +44,7 @@ class ConfigSlider(ttk.Frame):
 
         # row 1: Level-Meter Canvas (optional) ODER direkt der Slider-Bereich
         if show_level_meter:
-            self.meter_canvas = tk.Canvas(self, height=18, bg='#222',
+            self.meter_canvas = tk.Canvas(self, height=18, bg='#1e1e1e',
                                           highlightthickness=1, highlightbackground='#555')
             self.meter_canvas.grid(row=1, column=0, columnspan=2, sticky=tk.EW, padx=0, pady=(2, 1))
             self.meter_canvas.bind('<Configure>', lambda e: self._draw_meter())
@@ -146,7 +146,7 @@ class ConfigSlider(ttk.Frame):
                     rhigh_x = max(0, min(w, (rhigh - min_val) / val_range * w))
                 if rhigh_x > rlow_x:
                     self.meter_canvas.create_rectangle(
-                        rlow_x, 0, rhigh_x, h, fill='#2a2a22', outline='')
+                        rlow_x, 0, rhigh_x, h, fill="#363630", outline='')
             except Exception:
                 pass
 
