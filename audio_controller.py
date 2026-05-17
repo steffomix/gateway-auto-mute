@@ -105,8 +105,9 @@ class AudioController:
 
     def _start_monitor_stream(self, monitor_source_name: str) -> bool:
         """Startet einen persistenten parec-Subprocess für den Monitor-Stream.
-        parec wird mit --device=<monitor_source_name> gestartet, damit PipeWire
-        die Verbindung auch nach einem Cinnamon-Gerätewechsel nicht umleitet."""
+        PIPEWIRE_PROPS=node.dont-reconnect=true verhindert, dass WirePlumber
+        den Stream nach einem Cinnamon-Gerätewechsel auf das neue Standard-Gerät
+        umleitet ("Follow Default"-Policy des Session Managers)."""
         self._stop_monitor_stream()
         channels = self._get_source_channels(monitor_source_name)
         if channels == 1:
@@ -115,6 +116,13 @@ class AudioController:
             channel_map = 'front-left,front-right'
         else:
             channel_map = ','.join(['aux' + str(i) for i in range(channels)])
+
+        # PIPEWIRE_PROPS verhindert, dass WirePlumber den parec-Stream auf das
+        # neue Standard-Gerät umleitet, wenn Cinnamon den Default-Sink wechselt.
+        # node.autoconnect=false muss auf beiden Seiten (playback + capture) gesetzt
+        # sein, damit WirePlumber den Stream nicht auto-verbindet (Reddit r/linuxaudio).
+        env = os.environ.copy()
+        env['PIPEWIRE_PROPS'] = '{ node.dont-reconnect = true, node.autoconnect = false }'
 
         try:
             self._monitor_channels = channels
@@ -127,7 +135,8 @@ class AudioController:
                  f'--rate={self._MONITOR_RATE}',
                  f'--latency-msec={max(100, ((int(self.config.get("polling_interval", 50)) + 99) // 100) * 100)}'],
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
+                env=env
             )
             self._current_monitor_source = monitor_source_name
             self._current_peak = 0.0
