@@ -74,6 +74,10 @@ Das folgende Diagramm zeigt das Hardwaresetup, für das Gateway Auto-Mute entwic
 
 ![CB Gateway + Homestation combined — Schematischer Aufbau](images/gateway-auto-mute-schema.png)
 
+Mixer und CB Loopback Setup
+
+![CB Gateway + Homestation combined — Schematischer Aufbau](images/mixer-loopback-setup.png)
+
 ### Signalfluss im Detail
 
 | Verbindung | Beschreibung |
