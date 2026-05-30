@@ -78,18 +78,19 @@ Das folgende Diagramm zeigt das Hardwaresetup, für das Gateway Auto-Mute entwic
 
 | Verbindung | Beschreibung |
 |---|---|
-| **Antenne ↔ HF-Pfad** | CB-Empfang und -Sendung über die gemeinsame Antenne |
-| **Beringer HA400 (Kopfhörerverstärker)** | Verteilt das eingehende CB-Audio auf mehrere Abnahmepunkte |
-| **Main CB Station — Mono Line IN** | CB-Audio aus dem HA400 geht als Eingang in die Hauptstation |
+| **Antenne ↔ HF-Pfad** | CB-Empfang und -Sendung über die Hauptantenne der Heimstation, sowie lokalen Loopback Empfang über ein kleines Zweit- oder Handgerät mit kleiner Antenne (Stummelantenne) |
+| **Audio Amplifier** | Verteilt das eingehende CB-Audio auf mehrere Abnahmepunkte (Main CB Station, Main Speaker, Teamspeak CB Gateway) |
+| **Main CB Station — Mono Line IN** | CB-Audio vom Audio Amplifier geht als Eingang in die Hauptstation (dynamisches Mikrofon erforderlich) |
 | **Main CB Station — Mono Line OUT** | Sendepfad der Hauptstation zurück in den HF-Kreis |
 | **In House CB Loopback — Mono Line OUT** | Lokale Abhörschleife (Monitoring vor Ort) |
 | **Main Speaker — Stereo Line IN** | Lautsprecher-Wiedergabe des empfangenen CB-Signals |
-| **Teamspeak CB Gateway — USB Mono Line IN** | CB-Audio geht als Mikrofon-Eingang in den TS3-Client |
-| **Teamspeak CB Gateway — USB Stereo Line OUT** | TS3-Audio wird zur Heimstation weitergeleitet (Sendepfad) |
-| **Beringer MX400 (Audiomixer)** | Mischt die Signale für die verschiedenen Ausgabeziele |
-| **Gateway Auto-Mute (Software)** | Überwacht den USB Stereo Line OUT und dämpft den USB Mono Line IN automatisch |
+| **Teamspeak CB Gateway — USB Mono Line IN** | CB-Audio vom Audio Amplifier geht als Mikrofon-Eingang in den TS3-Client |
+| **Teamspeak CB Gateway — USB Stereo Line OUT** | TS3-Audio wird über einen Audio-Übertrager (4-8Ω) zum Audio Amplifier weitergeleitet |
+| **Audio-Übertrager (4-8Ω)** | Galvanische Trennung zwischen USB Line OUT und Audio Amplifier — eliminiert Systemrauschen, verbessert die Audioqualität und reduziert die Tendenz zur internen elektrischen Rückkopplung auf ein Minimum |
+| **Audio Mixer** | Mischt die Signale für die verschiedenen Ausgabeziele (Main CB Station, Main Speaker, Teamspeak CB Gateway) |
+| **Gateway Auto-Mute (Software)** | Überwacht den USB Stereo Line OUT aus dem Teamspeak Gateway und dämpft den USB Mono Line IN in das Teamspeak Gateway automatisch |
 
-> **Hinweis:** Die im Diagramm verwendeten Beringer-Geräte (HA400, MX400) sind lediglich preiswerte Beispielgeräte. Jedes andere Gerät mit ähnlicher Funktion — egal ob Kaufgerät eines anderen Herstellers oder Eigenbau — ist genauso geeignet. Entscheidend ist nur der Signalfluss, nicht das konkrete Modell.
+> **Hardware-Empfehlungen:** Das im Diagramm gezeigte Setup verwendet generische Bezeichnungen (Audio Amplifier, Audio Mixer), die durch verschiedene Geräte realisiert werden können. Als kostengünstige Einstiegslösung eignen sich z. B. **Beringer HA400** (Kopfhörerverstärker) und **Beringer MX400** (Audiomixer). Im produktiven Setup des Autors kommen **Rockboard HA4** (Headphone Amplifier) und **Rockboard LM4** (Line Mixer) zum Einsatz. Entscheidend ist die Funktion, nicht das konkrete Modell — auch Eigenbau-Lösungen sind geeignet.
 
 > **Gateway Auto-Mute** (lila Pfeil im Diagramm) überwacht softwareseitig den Lautsprecher-Ausgang der USB-Soundkarte und sperrt automatisch den Mikrofon-Eingang, solange TS3-Audio erkannt wird — bevor es zur Rückkopplung oder Störung der anderen Gateways im Verbund kommen kann.
 
