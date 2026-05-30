@@ -130,6 +130,7 @@ Die GUI ist in vier Bereiche aufgeteilt:
 | **Betriebssystem** | Linux mit PulseAudio (Ubuntu, Debian, Raspberry Pi OS, …) |
 | **Python** | 3.8 oder höher |
 | **PulseAudio** | Muss laufen (`pulseaudio --check`) |
+| **Mikrofon (Hardware)** | **Dynamisches Mikrofon erforderlich** — ein Elektret-Mikrofon würde durch den Monitor-Lautsprecher (Eigenhören) eine Rückkopplung erzeugen. Zwar könnte man das Audio zeitversetzt wiedergeben, um die Rückkopplung zu vermeiden, aber der „sich selbst ins Wort fallen"-Effekt würde das eigene Sprechen erheblich behindern. |
 | **Python-Pakete** | `pulsectl >= 23.5.0`, `pyperclip >= 1.8.2` |
 | **Optionale Systempakete** | `portaudio19-dev`, `python3-dev`, `pulseaudio-utils` |
 
